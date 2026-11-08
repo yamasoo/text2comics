@@ -75,6 +75,38 @@ class Project:
         except json.JSONDecodeError as error:
             raise ProjectError("%s 不是合法的 JSON：%s" % (path, error))
 
+    # --- S5：文字端的檔案 ---------------------------------------------------
+    def source_path(self, chapter):
+        """原著章節：source/chNNN.txt 或 .md；沒有就回傳 None。"""
+        for ext in (".txt", ".md"):
+            path = self.root / "source" / ("ch%03d%s" % (int(chapter), ext))
+            if path.is_file():
+                return path
+        return None
+
+    def load_source(self, chapter):
+        path = self.source_path(chapter)
+        if path is None:
+            raise ProjectError("找不到原著：請把第 %d 章放在 %s（.txt 或 .md）" % (int(chapter), self.root / "source" / ("ch%03d.txt" % int(chapter))))
+        text = path.read_text(encoding="utf-8").replace("\r\n", "\n").lstrip("﻿")
+        match = FRONT.match(text)          # 允許原著檔開頭有 frontmatter（例如從 Novel Studio 匯出的），略過
+        return (text[match.end():] if match else text).strip()
+
+    def plan_path(self, chapter):
+        return self.root / "plan" / ("ch%03d.json" % int(chapter))
+
+    def script_path(self, chapter):
+        return self.root / "script" / ("ch%03d.md" % int(chapter))
+
+    def load_plan(self, chapter):
+        path = self.plan_path(chapter)
+        if not path.is_file():
+            raise ProjectError("找不到改編規劃：%s（先執行 plan 階段）" % path)
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ProjectError("%s 不是合法的 JSON：%s" % (path, error))
+
     def out_dir(self, *parts):
         path = self.root.joinpath(*parts)
         path.mkdir(parents=True, exist_ok=True)

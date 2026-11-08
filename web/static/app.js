@@ -17,7 +17,7 @@
     ctx.view(h("div", { class: "page-narrow stack" },
       h("h1", {}, "文字轉漫畫"),
       h("p", {}, "把小說改編成日式黑白頁漫：改編 → 漫畫劇本 → 分鏡 → MOSS-Image 逐格出圖 → 嵌字 → 組版。"),
-      h("p", { class: "muted" }, "目前是骨架階段：先到「任務」頁編譯範例分鏡，確認每格的提示詞。進度見 docs/00_階段計畫.md。"),
+      h("p", { class: "muted" }, "目前是骨架階段：先到「任務」頁編譯範例分鏡，確認每格的提示詞；到「嵌字」頁拖曳調整範例頁的對話框。進度見 docs/00_階段計畫.md。"),
       h("div", { class: "row" },
         h("button", {
           class: "btn btn-primary",
@@ -48,6 +48,7 @@
     nav: [
       { label: "首頁", href: "#/", page: "home" },
       { label: "任務", href: "#/tasks", page: "tasks" },
+      { label: "嵌字", href: "#/letter", page: "letter" },
     ],
     panel: (el, shell) => {
       panel = FE.jobs.panel({

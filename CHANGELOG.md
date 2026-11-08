@@ -1,5 +1,18 @@
 # 更新紀錄
 
+## 0.5.0 — 2026-11-08（S5：文字端提示詞）
+
+- 新增 `t2c/prompts.py`：三階段提示詞（改編規劃、漫畫劇本、分鏡 JSON）。模板清單由 `layouts/pages.json` 自動產生（每格的位置與形狀）；範例用虛構角色；同階段的前綴完全相同，DeepSeek／llama.cpp 的前綴快取會生效；每次只送 system＋一則 user。
+- 新增 `t2c/script.py`：劇本解析（頁、格、鏡頭詞、角度詞、語氣標記、旁白、狀聲詞）、說話者對應聖經（姓名／別名／id）、劇本檢查、忠實度報告（台詞與原著逐字比對、原著引號台詞是否保留）。
+- 新增 `t2c/check.py`：改編規劃與分鏡頁的驗證，一次列出全部錯誤（寫明頁、格）。分鏡台詞必須和劇本逐字相同（只能加 `\n`）、每行 ≤ 12 字（旁白 16）、英文欄位不可有中文、不可描述外觀、說話者要在場、座標與 id 合法、每格 ≤ 3 個對話框。
+- 新增 `t2c/adapt.py`：`Adapter.run_plan()`／`run_script()`／`run_storyboard()`／`run_all()`。產生 → 驗證 → 把全部錯誤回給模型修（最多 `max_fix` 次，預設 3）→ 分鏡最後再過 `compile_chapter()` 才存檔。劇本、分鏡逐頁產生，可以只重做指定頁（其他頁、含人改過的維持原樣）；不覆蓋既有檔案（要 `force`）；模型原始輸出存在 `build/adapt/`；可依階段選 provider（`adapt`／`script`／`storyboard`）。
+- `t2c/project.py`：新增 `source_path()`、`load_source()`（略過 frontmatter）、`plan_path()`、`script_path()`、`load_plan()`。
+- 新增 `tools/adapt.py`：`--stage`、`--pages`、`--page`、`--provider`、`--force`、`--max-fix`、`--show-prompt`（只印提示詞，不需要金鑰）、`--stream`。
+- **資料格式新增**：`source/chNNN.txt`、`plan/chNNN.json`（`docs/02_資料格式.md` 第 11、12 節）；劇本格式補上鏡頭詞表與語氣標記 `（喊）`、`（小聲）`（第 4 節）。分鏡格式沒有新欄位，補充每格 ≤ 3 個對話框、每行字數的規則。
+- 範例：新增 `examples/sample_comic/source/ch001.txt`（原創，對應範例劇本）。
+- 新增 `docs/04_提示詞設計.md`。
+- 測試：新增 `tests/test_adapt.py` 49 項（腳本化假模型；最後一項透過假伺服器走真正的 `llm.chat_json`）；`test_core`、`test_llm`、`test_adapt` 在雲端 Linux 共 115 項，除了一項因工作區缺 `tools/panels.py` 無法執行外全部通過。
+
 ## 0.4.0 — 2026-11-08（S4：LLM 連線）
 
 - 新增 `t2c/llm.py`（只用標準函式庫）：OpenAI 相容的串流 `chat()`、`chat_json()`（JSON 模式；語法錯誤時把錯誤回給模型修一次；`finish_reason=length` 直接報錯）、`parse_json()`（容忍 ```json 圍欄與前後雜訊，物件或陣列）。

@@ -3,13 +3,13 @@
 把小說改編成**日式黑白頁漫**的本機工具：
 
 ```
-小說 → 改編規劃 → 漫畫劇本 → 分鏡 JSON → MOSS-Image 逐格出圖 → 嵌字 → 組版 → PDF／CBZ
+小說 → 改編規劃 → 漫畫劇本 → 分鏡 JSON → MOSS-Image 逐格出圖 → 組版 → 嵌字 → PDF／CBZ
         └──── DeepSeek／llama.cpp ────┘   └─ 程式編譯 ─┘   └ ComfyUI ┘   └──── Pillow ────┘
 ```
 
 先做成獨立工具，之後再併入 Novel Studio（`E:\novel-studio`）與 text_2_visual_novel（`E:\text_2_visual_novel`）。
 
-> 目前進度：**S0 骨架完成**。已經能把範例分鏡編譯成每格的 MOSS layout prompt，並送 ComfyUI 出圖；組版、嵌字、LLM 改編還沒做。進度見 `docs/00_階段計畫.md`。
+> 目前進度：**S5 文字端提示詞完成**。小說一章可以用 DeepSeek／llama.cpp 產生改編規劃、漫畫劇本與分鏡（自動驗證、回修）；分鏡能編譯、送 ComfyUI 出圖、組成整頁並嵌上直排繁中台詞。視覺聖經（S6）與整合介面（S7）還沒做。進度見 `docs/00_階段計畫.md`。
 
 ## 快速開始
 
@@ -26,8 +26,10 @@ python run.py                              # 或雙擊 start.bat
 不開介面、直接用命令列：
 
 ```powershell
+python tools\adapt.py E:\comics\作品 1                             # 原著 source\ch001.txt → 規劃、劇本、分鏡（需要 LLM）
 python tools\panels.py examples\sample_comic 1                      # 編譯：每格的提示詞寫到 build\ch001\
 python tools\panels.py examples\sample_comic 1 --page 1 --render    # 出圖：需要 ComfyUI 已啟動
+python tools\pages.py examples\sample_comic 1                        # 組版＋嵌字：依 picks\ch001.json、letters\ch001.json 輸出 pages\ch001\p001.png
 ```
 
 完整的環境建置（ComfyUI、模型、本機 LLM、git）見 `docs/03_建置與環境.md`。
@@ -41,11 +43,19 @@ python tools\panels.py examples\sample_comic 1 --page 1 --render    # 出圖：�
 | `t2c/compile.py` | 分鏡 JSON → 每格的 MOSS layout prompt |
 | `t2c/project.py` | 讀漫畫專案資料夾（project.yaml、視覺聖經、分鏡） |
 | `t2c/comfy.py` | 最小的 ComfyUI API 客戶端 |
+| `t2c/compose.py` | 選圖紀錄、裁切、組版成整頁 |
+| `t2c/letter.py` | 嵌字：對話框、尾巴、直排繁中、避開臉、狀聲詞、微調紀錄 |
+| `t2c/llm.py` | OpenAI 相容的 LLM 連線（DeepSeek、llama.cpp） |
+| `t2c/prompts.py`、`t2c/adapt.py` | 文字端三階段的提示詞與流程（產生 → 驗證 → 回修） |
+| `t2c/script.py`、`t2c/check.py` | 劇本解析、忠實度報告；規劃與分鏡的驗證 |
 | `layouts/pages.json` | 頁面格子模板（右翻閱讀順序） |
 | `workflows/` | ComfyUI 的 API 格式 workflow |
 | `tools/panels.py` | 命令列：編譯／出圖 |
-| `examples/sample_comic/` | 範例漫畫專案（1 頁 5 格） |
-| `app.py`、`web/` | 介面（fekit：FastAPI＋免建置前端） |
+| `tools/pages.py` | 命令列：選圖、組版、嵌字（頁面 PNG） |
+| `tools/adapt.py` | 命令列：改編規劃、劇本、分鏡 |
+| `tools/llm_check.py` | 命令列：檢查 LLM 連線 |
+| `examples/sample_comic/` | 範例漫畫專案（原著一章、1 頁 5 格） |
+| `app.py`、`web/` | 介面（fekit：FastAPI＋免建置前端）；「嵌字」頁拖曳微調對話框 |
 | `vendor/fekit/` | fekit 的複製品，**不要直接改**（見下） |
 | `docs/` | 計畫、架構、資料格式、建置說明、交接 |
 
@@ -57,6 +67,7 @@ python tools\panels.py examples\sample_comic 1 --page 1 --render    # 出圖：�
 | `docs/01_架構與流程.md` | 為什麼這樣設計（MOSS-Image 的特性與限制） |
 | `docs/02_資料格式.md` | 漫畫專案資料夾、角色卡、劇本、分鏡 JSON 的格式 |
 | `docs/03_建置與環境.md` | 從零把環境建起來 |
+| `docs/04_提示詞設計.md` | 文字端三階段的分工、提示詞、驗證與回修 |
 | `docs/HANDOFF.md` | 給下一個對話的交接 |
 
 ## 更新 fekit

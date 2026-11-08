@@ -1,2 +1,36 @@
 /* 文字轉漫畫 自己的樣式。顏色、間距用 fekit 的變數（var(--accent)、var(--sp-3)…），深色模式才會跟著變。 */
 .page-narrow { max-width: 48rem; }
+
+/* 嵌字頁 */
+.lt-title { margin: 0; font-size: var(--fs-xl); }
+.lt-inline { gap: var(--sp-2); margin: 0; }
+.lt-inline select, input.lt-num { width: 6rem; }
+.lt-path { margin: 0; font-size: var(--fs-xs); word-break: break-all; }
+.lt-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: var(--sp-4); align-items: start; }
+.lt-stage {
+  position: relative; justify-self: center; width: 100%;
+  max-width: calc((100vh - 9rem) * var(--page-ratio, .708));
+  box-shadow: var(--shadow-1); background: #fff; user-select: none; touch-action: none;
+}
+.lt-img { display: block; width: 100%; height: auto; }
+.lt-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lt-side { position: sticky; top: 0; }
+.lt-quote { margin: 0; font-size: var(--fs-lg); white-space: pre-line; }
+.lt-warnings { margin: 0; padding-left: 1.2em; font-size: var(--fs-sm); }
+@media (max-width: 900px) { .lt-wrap { grid-template-columns: 1fr; } }
+
+.lt-panel { fill: none; stroke: #2f5a7a; stroke-width: 1; stroke-dasharray: 2 4; pointer-events: none; }
+.lt-face { fill: rgba(200, 40, 40, .08); stroke: #c82828; stroke-width: 2; stroke-dasharray: 6 4; cursor: move; }
+.lt-bubble { fill: rgba(0, 0, 0, 0); stroke: #2a6fd6; stroke-width: 2; stroke-dasharray: 6 4; cursor: move; pointer-events: all; }
+.lt-sfx { fill: rgba(230, 130, 20, .06); stroke: #e08214; stroke-width: 2; stroke-dasharray: 6 4; cursor: move; }
+.lt-handle { fill: #fff; stroke: #c82828; stroke-width: 2; cursor: nwse-resize; }
+.lt-handle-sfx { stroke: #e08214; }
+.lt-tail { fill: #2a6fd6; stroke: #fff; stroke-width: 2; cursor: crosshair; }
+.lt-tail.lt-manual { fill: #8a3b2e; }
+.lt-tail-line { stroke: #2a6fd6; stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.lt-sel { stroke-width: 3; stroke-dasharray: none; }
+.lt-bubble.lt-sel { fill: rgba(42, 111, 214, .1); }
+.lt-quiet .lt-panel, .lt-quiet .lt-tail-line { display: none; }
+.lt-quiet .lt-face:not(.lt-sel), .lt-quiet .lt-bubble:not(.lt-sel), .lt-quiet .lt-sfx:not(.lt-sel) { stroke-opacity: 0; fill-opacity: 0; }
+.lt-quiet .lt-handle { opacity: 0; }
+.lt-quiet .lt-bubble:hover, .lt-quiet .lt-face:hover, .lt-quiet .lt-sfx:hover { stroke-opacity: .7; }

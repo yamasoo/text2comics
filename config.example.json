@@ -61,10 +61,13 @@
     }
   },
   "lettering": {
-    "_說明": "嵌字用的字型（TTF／OTF／TTC 的完整路徑）。字型不隨專案發佈，請自己安裝並確認授權。",
+    "_說明": "嵌字用的字型（TTF／OTF／TTC 的完整路徑；TTC 可以在後面加 #索引）。空白＝自動找（Noto CJK TC、思源、微軟正黑體…）。字型不隨專案發佈，請自己安裝並確認授權。說明見 docs/03_建置與環境.md 第 7 節。",
     "dialogue_font": "",
+    "shout_font": "",
     "narration_font": "",
     "sfx_font": "",
-    "vertical": true
+    "vertical": true,
+    "dialogue_pt": 9,
+    "narration_pt": 8.5
   }
 }
