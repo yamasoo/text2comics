@@ -40,6 +40,24 @@
       "unet": "moss_image_sft_int8_convrot.safetensors",
       "clip": "qwen3.5_9b_w4a8_gptq.safetensors",
       "vae": "flux2-vae_small.safetensors"
+    },
+    "default_preset": "final",
+    "presets": {
+      "_說明": "出圖預設：steps、cfg、sampler、scheduler、lora（ComfyUI 列出的名稱，含子資料夾）、lora_strength。tools/panels.py 用 --preset 選；不是 default_preset 的，檔名會加後綴。S1 實測：draft 約快 3.3 倍，final 的網點與墨線比較有漫畫感。",
+      "final": {
+        "steps": 25,
+        "cfg": 2.5,
+        "sampler": "er_sde",
+        "scheduler": "simple"
+      },
+      "draft": {
+        "steps": 4,
+        "cfg": 1.0,
+        "sampler": "euler",
+        "scheduler": "simple",
+        "lora": "ANIMA\\moss_image_sft_4step_v2.0.safetensors",
+        "lora_strength": 1.0
+      }
     }
   },
   "lettering": {

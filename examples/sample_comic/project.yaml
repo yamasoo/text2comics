@@ -9,5 +9,5 @@ meta: [manga panel, black and white, screentone]
 megapixels: 1.0              # 每格生圖約 1 MP（MOSS 建議 1–2 MP）
 negative: nsfw, worst quality, bad anatomy, watermark, jpeg artifact, text, speech bubble, letters
 sfx_mode: overlay            # overlay＝狀聲詞也由嵌字程式疊上；moss＝交給 MOSS 畫
-candidates: 2                # 每格產生幾張候選
+candidates: 3                # 每格產生幾張候選（S1 實測：2 個常有 1 個不能用，建議 3）
 seed_base: 0

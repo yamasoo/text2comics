@@ -9,6 +9,7 @@
 """
 import hashlib
 import json
+import re
 
 from . import layout
 
@@ -57,9 +58,39 @@ def cast_sentence(count):
     return "This panel shows exactly %s, and each person appears only once." % who
 
 
-def character_caption(card, entry):
-    """角色 item 的 caption：聖經的 look_en（逐字）＋服裝＋這一格的姿勢、表情。"""
-    parts = [_sentence(card["look_en"])]
+NO_FRAME = "The image has no border or frame."
+NO_LETTERING = "The artwork has no speech bubbles, captions or lettering."
+
+
+def side_of_frame(box):
+    """比例框的水平位置：left／center／right（以中心點判斷）。"""
+    center = (box[0] + box[2]) / 2.0
+    if center < 0.4:
+        return "left"
+    if center > 0.6:
+        return "right"
+    return "center"
+
+
+def _subject(card):
+    """從 look_en 判斷用 She／He／This character（S1 實測：多角色時要寫明左右，見 docs/qa/S1_出圖實測.md）。"""
+    words = set(re.findall(r"[a-z]+", str(card.get("look_en", "")).lower()))
+    if words & {"woman", "girl", "female", "lady"}:
+        return "She"
+    if words & {"man", "boy", "male", "guy"}:
+        return "He"
+    return "This character"
+
+
+def side_sentence(card, side):
+    where = "in the center of the frame" if side == "center" else "on the %s side of the frame" % side
+    return "%s is %s." % (_subject(card), where)
+
+
+def character_caption(card, entry, side=None):
+    """角色 item 的 caption：（多角色時的左右位置）＋聖經的 look_en（逐字）＋服裝＋這一格的姿勢、表情。"""
+    parts = [side_sentence(card, side)] if side else []
+    parts.append(_sentence(card["look_en"]))
     outfits = card.get("outfits") or {}
     outfit_id = entry.get("outfit") or "default"
     outfit = outfits.get(outfit_id)
@@ -98,7 +129,8 @@ def compile_panel(project, page, panel, template_box, settings):
             caption.append(_sentence("Setting: " + card["look_en"]))
         caption.append(_sentence(panel.get("scene", "")))
         caption.append(cast_sentence(len(chars)))
-        caption.append("The artwork has no speech bubbles, captions or lettering.")
+        caption.append(NO_FRAME)
+        caption.append(NO_LETTERING)
 
         items = []
         if location is not None:
@@ -113,8 +145,10 @@ def compile_panel(project, page, panel, template_box, settings):
             if cid in seen:
                 raise KeyError("角色「%s」在同一格出現兩次" % cid)
             seen.add(cid)
-            items.append({"label": "character", "caption": character_caption(card, entry),
-                          "bbox": layout.to_moss_bbox(entry.get("box", [0.25, 0.1, 0.75, 1]), width, height)})
+            box = entry.get("box", [0.25, 0.1, 0.75, 1])
+            side = side_of_frame(layout.check_box(box)) if len(chars) >= 2 else None
+            items.append({"label": "character", "caption": character_caption(card, entry, side),
+                          "bbox": layout.to_moss_bbox(box, width, height)})
         for obj in panel.get("objects") or []:
             items.append({"label": "object", "caption": _sentence(obj["caption"]),
                           "bbox": layout.to_moss_bbox(obj["box"], width, height)})

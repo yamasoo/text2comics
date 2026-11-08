@@ -2,7 +2,8 @@
 
 workflow 用 API 格式（ComfyUI 選單 Export (API)），預設是 workflows/moss_layout.api.json。
 要改的節點從 KSampler 往回追：positive／negative 的 CLIPTextEncode、latent 的寬高、seed；
-模型檔名照 config.json 的 comfy.models 覆蓋。其他參數（步數、CFG、取樣器）照 workflow。
+模型檔名照 config.json 的 comfy.models 覆蓋。步數、CFG、取樣器預設照 workflow；
+傳入 preset（config.json 的 comfy.presets 其中一組）就覆蓋，並可在模型後面接一個 LoRA（見 apply_preset）。
 
 之後併入 Novel Studio 時，改用它的 studio/comfy.py（功能較完整：LoRA、Upsampler、錯誤說明）。
 這裡刻意保持小，只為了獨立工具能先跑起來。
@@ -22,8 +23,46 @@ LOADERS = {"UNETLoader": "unet_name", "CLIPLoader": "clip_name", "VAELoader": "v
 MODEL_KEYS = {"UNETLoader": "unet", "CLIPLoader": "clip", "VAELoader": "vae"}
 
 
+PRESET_KEYS = {"steps": "steps", "cfg": "cfg", "sampler": "sampler_name", "scheduler": "scheduler"}
+PRESET_OTHER = {"lora", "lora_strength", "note"}
+LORA_NODE_ID = "t2c_lora"
+
+
 class ComfyError(Exception):
     """給人看的錯誤訊息。"""
+
+
+def apply_preset(wf, preset):
+    """把出圖預設套到 workflow（就地修改）：steps、cfg、sampler、scheduler，以及可選的 lora。
+
+    preset 例：{"steps": 4, "cfg": 1.0, "sampler": "euler", "scheduler": "simple",
+                "lora": "ANIMA\\\\moss_image_sft_4step_v2.0.safetensors", "lora_strength": 1.0}
+    lora 用 ComfyUI 列出的名稱（含子資料夾）；套用方式是在 KSampler 的 model 前面接一個 LoraLoaderModelOnly。
+    """
+    if not preset:
+        return wf
+    unknown = set(preset) - set(PRESET_KEYS) - PRESET_OTHER
+    if unknown:
+        raise ComfyError("出圖預設有不認得的欄位：%s（可用：%s）" % ("、".join(sorted(unknown)), "、".join(sorted(set(PRESET_KEYS) | PRESET_OTHER))))
+    ins = wf[_sampler(wf)]["inputs"]
+    try:
+        for key, target in PRESET_KEYS.items():
+            if key in preset:
+                ins[target] = int(preset[key]) if key == "steps" else float(preset[key]) if key == "cfg" else str(preset[key])
+    except (TypeError, ValueError):
+        raise ComfyError("出圖預設的 steps 要是整數、cfg 要是數字：%r" % {k: preset[k] for k in ("steps", "cfg") if k in preset})
+    if preset.get("lora"):
+        wf[LORA_NODE_ID] = {"class_type": "LoraLoaderModelOnly", "_meta": {"title": "LoRA（出圖預設）"},
+                            "inputs": {"model": ins["model"], "lora_name": str(preset["lora"]),
+                                       "strength_model": float(preset.get("lora_strength", 1.0))}}
+        ins["model"] = [LORA_NODE_ID, 0]
+    return wf
+
+
+def render_name(panel_id, seed, preset_name=None, default_preset=None):
+    """出圖檔名：<格 id>_s<seed>.png；用的不是預設的出圖預設時，加 _<預設名>，避免同一個 seed 的草稿蓋掉定稿。"""
+    suffix = "_%s" % preset_name if preset_name and preset_name != default_preset else ""
+    return "%s_s%d%s.png" % (panel_id, int(seed), suffix)
 
 
 def _req(base, path, data=None, timeout=30, raw=False):
@@ -52,9 +91,10 @@ def _sampler(wf):
     return found[0]
 
 
-def prepare(wf, positive, negative, seed, width, height, models=None, prefix="text2comics/panel"):
-    """回傳 (修改後的 workflow, 輸出節點 id)。不改動傳入的 wf。"""
+def prepare(wf, positive, negative, seed, width, height, models=None, prefix="text2comics/panel", preset=None):
+    """回傳 (修改後的 workflow, 輸出節點 id)。不改動傳入的 wf。preset 見 apply_preset。"""
     wf = copy.deepcopy(wf)
+    apply_preset(wf, preset)
     sid = _sampler(wf)
     ins = wf[sid]["inputs"]
     ins["seed"] = int(seed)
