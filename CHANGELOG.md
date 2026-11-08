@@ -1,5 +1,33 @@
 # 更新紀錄
 
+## 0.4.0 — 2026-11-08（S4：LLM 連線）
+
+- 新增 `t2c/llm.py`（只用標準函式庫）：OpenAI 相容的串流 `chat()`、`chat_json()`（JSON 模式；語法錯誤時把錯誤回給模型修一次；`finish_reason=length` 直接報錯）、`parse_json()`（容忍 ```json 圍欄與前後雜訊，物件或陣列）。
+- 重試：429、408、5xx、連線失敗、尚未收到任何字就斷線，最多 3 次，等待 2／4／8 秒（尊重 `Retry-After`）；401、402、404 等不重試；已經吐出字之後斷線不重試（會重複）。
+- 取消：`should_stop` 在背景執行緒讀取、主執行緒每 0.2 秒檢查；按停止會切斷連線（本機模型也跟著停）並丟出 `Cancelled`。介面任務傳 `lambda: job.stopping`。
+- token 估算：`estimate_tokens()`、`estimate_messages()`、`context_left()`、`check_context()`；中日韓字乘 `cjk_token_ratio`（沒設定時 DeepSeek 0.6、其他 1.2）。
+- providers 沿用 Novel Studio 的欄位（`base_url`、`model`、`key_env`、`context_tokens`、`max_output`、`temperature`、`json_mode`、`extra`、`reasoning`）；`find_provider()` 依 指定 → `stage_providers` → `default_provider` 選。金鑰只讀環境變數（不做金鑰庫）。
+- 新增 `tools/llm_check.py`：對每個 provider 要一份 JSON；`--stop-after N` 測停止；`--models` 列模型。
+- 資料格式沒有變動；`config.json` 沒有新欄位（`reasoning` 為選填，格式同 Novel Studio）。
+- 測試：新增 `tests/test_llm.py` 37 項（本機假伺服器）；雲端 Linux 全過。
+
+## 0.3.0 — 2026-11-08（S3：嵌字）
+
+- 新增 `t2c/letter.py`：對話框（橢圓、雲狀思考＋小圓點、爆炸喊叫、虛線悄悄話、旁白方框）、尾巴指向說話者的臉、直排繁中（欄由右到左、`，。、` 置中、括號與刪節號轉 90 度、`！？` 縱中橫）、斷行禁則、自動避開臉／其他對話框／重要物件、狀聲詞（黑字白邊、可傾斜）、橫排模式。
+- `t2c/compose.py`：新增 `crop_box()`、`crop_window()`、`page_panels()`、`render_page()`、`save_page()`、`find_page()`；`compose_chapter()` 多了 `lettering`、`letters`、`guides` 參數（不給 `lettering` 時行為與 0.2.0 相同）。
+- `tools/pages.py`：預設組版後嵌字；新增 `--no-letter`、`--guides`、`--config`。**`pages/chNNN/pNNN.png` 現在是嵌好字的頁面**，要沒有字的版本加 `--no-letter`。
+- 介面新增「嵌字」頁（`web/static/letter.js`）：拖對話框、尾巴尖端、臉框、狀聲詞；改字級、每欄字數、尾巴有無；按「存檔」寫入 `letters/chNNN.json` 並重新輸出頁面。API：`/api/letter/plan`、`/api/letter/preview.jpg`、`/api/letter/art.png`、`/api/letter/save`。
+- **資料格式新增**：`letters/chNNN.json`（格式版本 1），見 `docs/02_資料格式.md` 第 10 節；`config.json` 的 `lettering` 新增 `shout_font`、`dialogue_pt`、`narration_pt`，字型可以留空自動找（第 03 文件第 7 節）。分鏡格式沒有新增欄位，只補充說明：座標相對於生成的圖、台詞裡的 `\n` 強制換欄。
+- 範例分鏡：k3 的喊叫、k5 的心聲加上 `\n` 分句（自動斷句會把「教／授」拆開）。
+- 測試：新增 `tests/test_letter.py` 65 項、`tests/test_smoke.py` 2 項（嵌字 API）；全部 120 項在雲端 Linux 通過。
+## 0.2.0 — 2026-11-08（S2：組版）
+
+- 新增 `t2c/compose.py`：選圖紀錄 `picks/chNNN.json`、cover 裁切（`focus`、`zoom`）、格框與頁邊、輸出 `pages/chNNN/pNNN.png`（B5 比例 1820×2570、254 dpi、預設灰階）。
+- 新增 `tools/pages.py`：`--list`、`--pick`、`--focus`、`--zoom`、`--numbers`、`--color`、`--out`。
+- **資料格式新增**：`picks/chNNN.json`（格式版本 1），見 `docs/02_資料格式.md` 第 8、9 節。既有的 `project.yaml`、分鏡、聖經、模板沒有變動。
+- 範例：新增 `examples/sample_comic/picks/ch001.json`（S1 初選的 5 張）。
+- 測試：新增 `tests/test_compose.py` 20 項；`pytest tests/test_core.py tests/test_compose.py` 47 項全過（雲端 Linux）。
+
 ## 0.1.2 — 2026-11-08（S1：出圖預設）
 
 - `config.json` 新增 `comfy.presets`、`comfy.default_preset`：每組可覆蓋 `steps`、`cfg`、`sampler`、`scheduler`，並可接 LoRA（`lora`、`lora_strength`）。`config.example.json` 附 `final`（照原 workflow）與 `draft`（4 步＋`moss_image_sft_4step_v2.0` LoRA）。沒有 `presets` 時行為與 0.1.0 相同。
