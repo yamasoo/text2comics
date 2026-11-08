@@ -1,5 +1,16 @@
 # 更新紀錄
 
+## 0.6.0 — 2026-11-08（S6：視覺聖經）
+
+- 新增 `t2c/bible_check.py`（純規則）：`look_en` 必須英文、≥ 6 字、有性別與年齡字，不得含服裝／表情／動作字；服裝要有 `default`、以 `He/She/They wears` 開頭、人稱與 `look_en` 一致；地點不得有人物字。掃描結果每條外觀事實要附原文逐字引文，對不上就丟掉。
+- 新增 `t2c/bible_prompts.py`：掃描與成卡的提示詞（範例用虛構人物，測試保證範例通過檢查；字表和檢查共用同一份）。
+- 新增 `t2c/bible.py`：`Builder`（逐章掃描 → 合併證據 → 逐人成卡；失敗把全部錯誤回修，最多 `max_fix`；章節雜湊快取）、`lint()`、`accept()`（草稿 → 定案，先過檢查，不覆蓋既有定案卡）、`sheet_jobs()`／`render_sheets()`（定裝圖：角色全身與胸像各服裝一組、地點一張，重用 `compile_chapter()` 與 ComfyUI）、`contact_sheet()`（Pillow 拼比較表）、`pick()`（挑選紀錄與過期偵測）、`status()`／`matrix_markdown()`（服裝矩陣：誰有哪些服裝、有沒有定裝圖、被哪些章用到）。provider 階段名 `bible`。
+- 新增 `tools/bible.py`：`extract`、`scan`、`draft`、`check`、`accept`、`sheet`、`contact`、`pick`、`status`；`--show-prompt` 不需要金鑰。
+- **資料格式新增**：角色卡 `outfit_notes`、`status`；`bible/drafts/`、`bible/picks.json`；`build/bible/`、`renders/bible/`（`docs/02_資料格式.md` 第 3、13 節）。舊卡片不受影響。
+- `config.example.json`：`stage_providers.bible`。`.gitignore`：`work/`。
+- 測試：新增 `tests/test_bible.py` 30 項（假模型；一項走假伺服器；出圖用假的 ComfyUI）；全部測試（不含需要 ComfyUI 的 `test_smoke.py`）在雲端 Linux 共 230 項通過。
+- 範例：`work/mars_war` 的《第一次火星獨立戰爭》8 張角色與 9 張地點草稿（尚未確認，不是範例專案的一部分）。
+
 ## 0.5.0 — 2026-11-08（S5：文字端提示詞）
 
 - 新增 `t2c/prompts.py`：三階段提示詞（改編規劃、漫畫劇本、分鏡 JSON）。模板清單由 `layouts/pages.json` 自動產生（每格的位置與形狀）；範例用虛構角色；同階段的前綴完全相同，DeepSeek／llama.cpp 的前綴快取會生效；每次只送 system＋一則 user。

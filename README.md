@@ -48,11 +48,13 @@ python tools\pages.py examples\sample_comic 1                        # 組版＋
 | `t2c/llm.py` | OpenAI 相容的 LLM 連線（DeepSeek、llama.cpp） |
 | `t2c/prompts.py`、`t2c/adapt.py` | 文字端三階段的提示詞與流程（產生 → 驗證 → 回修） |
 | `t2c/script.py`、`t2c/check.py` | 劇本解析、忠實度報告；規劃與分鏡的驗證 |
+| `t2c/bible.py`、`t2c/bible_prompts.py`、`t2c/bible_check.py` | 視覺聖經：抽角色與地點 → 卡片草稿 → 規則檢查 → 定裝圖 → 服裝矩陣 |
 | `layouts/pages.json` | 頁面格子模板（右翻閱讀順序） |
 | `workflows/` | ComfyUI 的 API 格式 workflow |
 | `tools/panels.py` | 命令列：編譯／出圖 |
 | `tools/pages.py` | 命令列：選圖、組版、嵌字（頁面 PNG） |
 | `tools/adapt.py` | 命令列：改編規劃、劇本、分鏡 |
+| `tools/bible.py` | 命令列：視覺聖經（掃描、草稿、檢查、確認、定裝圖、挑選、矩陣） |
 | `tools/llm_check.py` | 命令列：檢查 LLM 連線 |
 | `examples/sample_comic/` | 範例漫畫專案（原著一章、1 頁 5 格） |
 | `app.py`、`web/` | 介面（fekit：FastAPI＋免建置前端）；「嵌字」頁拖曳微調對話框 |

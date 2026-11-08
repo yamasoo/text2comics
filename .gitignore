@@ -26,3 +26,6 @@ secrets.json
 **/renders/
 **/pages/
 **/out/
+
+# 實際作品的工作資料夾（放自己的小說與漫畫專案；範例在 examples/）
+work/

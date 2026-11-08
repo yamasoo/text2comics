@@ -250,6 +250,13 @@ def test_cancel_while_waiting_for_first_byte(serve):
     assert time.monotonic() - t0 < 2
 
 
+def test_cancel_first_byte_even_if_shutdown_is_ineffective(serve, monkeypatch):
+    """Windows 上 socket.shutdown 不一定叫得醒卡在 recv 的讀取執行緒；取消不能因此等到伺服器下一次寫資料。"""
+    import socket
+    monkeypatch.setattr(socket.socket, "shutdown", lambda self, how: None)
+    test_cancel_while_waiting_for_first_byte(serve)
+
+
 def test_cancel_during_retry_wait(serve):
     f = serve([{"status": 503}])
     stop = threading.Event()

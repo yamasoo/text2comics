@@ -31,7 +31,8 @@
     "_說明": "每個階段可以指定不同的模型；空字串＝用 default_provider。",
     "adapt": "",
     "script": "",
-    "storyboard": ""
+    "storyboard": "",
+    "bible": ""
   },
   "comfy": {
     "url": "http://127.0.0.1:8188",

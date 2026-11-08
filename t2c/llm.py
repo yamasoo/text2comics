@@ -256,10 +256,14 @@ def _kill(holder):
             sock.shutdown(socket.SHUT_RDWR)
     except Exception:
         pass
-    try:
-        resp.close()
-    except Exception:
-        pass
+    # resp.close() 要拿緩衝區的鎖；讀取執行緒正卡在 recv 時握著它（Windows 上 shutdown 不一定叫得醒），
+    # 主執行緒在這裡等就會等到伺服器下一次寫資料。所以交給背景執行緒關，取消不能被它拖住。
+    def _close():
+        try:
+            resp.close()
+        except Exception:
+            pass
+    threading.Thread(target=_close, daemon=True).start()
 
 
 def _reader(req, timeout, q, holder):
