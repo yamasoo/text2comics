@@ -1,0 +1,12 @@
+{
+  "_說明": "key 是程式裡的中文原文，值是英文；開頭是底線的 key 會被忽略。沒翻的原樣顯示中文，可以慢慢補。",
+  "首頁": "Home",
+  "任務": "Tasks",
+  "呼叫後端": "Call the backend",
+  "按下按鈕呼叫後端。": "Press the button to call the backend.",
+  "開始示範任務": "Start demo task",
+  "文字轉漫畫": "Text to Comics",
+  "把小說改編成日式黑白頁漫：改編 → 漫畫劇本 → 分鏡 → MOSS-Image 逐格出圖 → 嵌字 → 組版。": "Adapt novels into black-and-white Japanese-style manga pages: adaptation → comic script → storyboard → per-panel MOSS-Image renders → lettering → page layout.",
+  "目前是骨架階段：先到「任務」頁編譯範例分鏡，確認每格的提示詞。進度見 docs/00_階段計畫.md。": "This is the scaffold stage: open Tasks and compile the sample storyboard to check each panel's prompt. Progress is in docs/00_階段計畫.md.",
+  "編譯範例分鏡": "Compile sample storyboard"
+}

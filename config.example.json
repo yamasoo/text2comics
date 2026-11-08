@@ -1,0 +1,52 @@
+{
+  "_說明": "複製成 config.json 再改（config.json 不進版控）。金鑰不寫在這裡：DeepSeek 用環境變數 DEEPSEEK_API_KEY。providers 的格式與 Novel Studio 相同，之後整合時可以直接共用。",
+  "providers": [
+    {
+      "id": "deepseek",
+      "type": "openai",
+      "name": "DeepSeek",
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-flash",
+      "key_env": "DEEPSEEK_API_KEY",
+      "context_tokens": 128000,
+      "max_output": 32000,
+      "temperature": 1.0,
+      "json_mode": true
+    },
+    {
+      "id": "llamacpp",
+      "type": "openai",
+      "name": "llama.cpp（本機）",
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "key_env": "",
+      "context_tokens": 32768,
+      "max_output": 10000,
+      "temperature": 0.8,
+      "json_mode": true
+    }
+  ],
+  "default_provider": "deepseek",
+  "stage_providers": {
+    "_說明": "每個階段可以指定不同的模型；空字串＝用 default_provider。",
+    "adapt": "",
+    "script": "",
+    "storyboard": ""
+  },
+  "comfy": {
+    "url": "http://127.0.0.1:8188",
+    "workflow": "workflows/moss_layout.api.json",
+    "models": {
+      "unet": "moss_image_sft_int8_convrot.safetensors",
+      "clip": "qwen3.5_9b_w4a8_gptq.safetensors",
+      "vae": "flux2-vae_small.safetensors"
+    }
+  },
+  "lettering": {
+    "_說明": "嵌字用的字型（TTF／OTF／TTC 的完整路徑）。字型不隨專案發佈，請自己安裝並確認授權。",
+    "dialogue_font": "",
+    "narration_font": "",
+    "sfx_font": "",
+    "vertical": true
+  }
+}

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+.venv/
+
+# 環境與暫存
+.env
+*.log
+.tmp/
+
+# 作業系統／編輯器
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# 本機設定（含路徑、模型名稱）
+config.json
+secrets.json
+
+# 漫畫專案的產出（任何位置）
+**/build/
+**/renders/
+**/pages/
+**/out/

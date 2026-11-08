@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "chapter": 1,
+  "title": "遲到的便當",
+  "pages": [
+    {
+      "page": 1,
+      "template": "5a",
+      "panels": [
+        {
+          "slot": 1,
+          "id": "p001_k1",
+          "shot": "extreme_wide",
+          "angle": "high",
+          "location": "rooftop",
+          "scene": "Noon sunlight on an empty rooftop. A young woman sits alone on the ground in the shadow of a water tank, holding a phone to her ear.",
+          "characters": [
+            {"id": "lin", "pose": "Sitting on the ground with her knees up, holding a phone to her ear", "expression": "Annoyed", "box": [0.55, 0.45, 0.8, 0.9]}
+          ],
+          "bubbles": [
+            {"kind": "narration", "text": "十二點四十分。", "anchor": [0.9, 0.1]},
+            {"kind": "speech", "speaker": "lin", "text": "……又不接。", "anchor": [0.5, 0.35]}
+          ]
+        },
+        {
+          "slot": 2,
+          "id": "p001_k2",
+          "shot": "extreme_close",
+          "angle": "eye",
+          "scene": "Close-up of a smartphone screen held in a hand, the screen glowing, showing a missed-call notification icon.",
+          "characters": [],
+          "objects": [
+            {"caption": "A smartphone held in a woman's hand, screen facing the viewer", "box": [0.15, 0.1, 0.85, 0.95]}
+          ],
+          "bubbles": []
+        },
+        {
+          "slot": 3,
+          "id": "p001_k3",
+          "shot": "medium",
+          "angle": "eye",
+          "location": "rooftop",
+          "scene": "A metal rooftop door bursts open. A young man rushes through it, out of breath, raising two lunch boxes high in one hand.",
+          "characters": [
+            {"id": "hao", "pose": "Running forward through an open metal door, one arm raised holding two stacked lunch boxes", "expression": "Panicked and apologetic", "box": [0.3, 0.05, 0.7, 1]}
+          ],
+          "sfx": [{"text": "碰！", "box": [0.75, 0.05, 0.98, 0.4]}],
+          "bubbles": [
+            {"kind": "shout", "speaker": "hao", "text": "對不起！排隊排到一半被教授抓去搬東西！", "anchor": [0.12, 0.2]}
+          ]
+        },
+        {
+          "slot": 4,
+          "id": "p001_k4",
+          "shot": "medium",
+          "angle": "eye",
+          "location": "rooftop",
+          "scene": "The young woman sits with her arms crossed, turning her face away to the side in a sulk.",
+          "characters": [
+            {"id": "lin", "pose": "Sitting with arms crossed, head turned away to the side", "expression": "Sulking", "box": [0.2, 0.15, 0.8, 1]}
+          ],
+          "bubbles": [
+            {"kind": "speech", "speaker": "lin", "text": "我已經不餓了。", "anchor": [0.85, 0.15]}
+          ]
+        },
+        {
+          "slot": 5,
+          "id": "p001_k5",
+          "shot": "close",
+          "angle": "over_shoulder",
+          "location": "rooftop",
+          "scene": "The young man holds out a lunch box toward the young woman. A small handwritten paper note is taped on the lid. She glances at the note, her ears slightly red.",
+          "characters": [
+            {"id": "hao", "pose": "Seen from behind over his shoulder, holding out a lunch box with both hands", "expression": "Gentle", "box": [0.55, 0.1, 1, 1]},
+            {"id": "lin", "pose": "Sitting, glancing sideways at the lunch box", "expression": "Embarrassed, blushing slightly", "box": [0, 0.15, 0.5, 1]}
+          ],
+          "objects": [
+            {"caption": "A plastic lunch box with a small paper note taped on the lid", "box": [0.35, 0.45, 0.65, 0.75]}
+          ],
+          "bubbles": [
+            {"kind": "speech", "speaker": "hao", "text": "妳上次說的，不要香菜。", "anchor": [0.85, 0.08]},
+            {"kind": "thought", "speaker": "lin", "text": "……記得這種事幹嘛。", "anchor": [0.12, 0.08]}
+          ]
+        }
+      ]
+    }
+  ]
+}

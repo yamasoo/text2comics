@@ -1,0 +1,2 @@
+/* 文字轉漫畫 自己的樣式。顏色、間距用 fekit 的變數（var(--accent)、var(--sp-3)…），深色模式才會跟著變。 */
+.page-narrow { max-width: 48rem; }

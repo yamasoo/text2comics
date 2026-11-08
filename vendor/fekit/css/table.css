@@ -1,0 +1,79 @@
+/* fekit table.css — 用 tokens.css 的變數覆蓋 Tabulator 的配色（含深色）。
+ * 要在 vendor/tabulator/tabulator.min.css 之後載入；FE.table.load() 會照順序載入兩者。 */
+
+.tabulator {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tabulator .tabulator-header {
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--line);
+}
+.tabulator .tabulator-header .tabulator-col {
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line);
+}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content { padding: .5rem .7rem; }
+.tabulator .tabulator-header .tabulator-col .tabulator-col-title { font-weight: 600; }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover { background: var(--accent-soft); }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="ascending"] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow { border-bottom-color: var(--accent); }
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="descending"] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow { border-top-color: var(--accent); }
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter .tabulator-arrow { border-bottom-color: var(--fg-faint); border-top-color: var(--fg-faint); }
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter { padding: 0 .4rem .4rem; }
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input,
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter select {
+  min-height: 1.8rem;
+  padding: .15rem .4rem;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.tabulator .tabulator-tableholder { background: var(--bg-elev); }
+.tabulator .tabulator-tableholder .tabulator-placeholder span { color: var(--fg-muted); }
+.tabulator .tabulator-tableholder .tabulator-placeholder .tabulator-placeholder-contents { color: var(--fg-muted); font-weight: normal; font-size: inherit; }
+
+.tabulator-row { background: var(--bg-elev); color: var(--fg); border-bottom: 1px solid var(--line); min-height: 2.2rem; }
+.tabulator-row.tabulator-row-even { background: var(--bg-elev); }
+.tabulator-row.tabulator-selectable:hover { background: var(--accent-soft); cursor: pointer; }
+.tabulator-row.tabulator-selected,
+.tabulator-row.tabulator-selected:hover { background: var(--accent); color: var(--on-accent); }
+.tabulator-row .tabulator-cell { padding: .5rem .7rem; border-right: 1px solid var(--line); }
+.tabulator-row .tabulator-cell.tabulator-editing { background: var(--bg-elev); border: 1px solid var(--accent); padding: 0; }
+.tabulator-row .tabulator-cell.tabulator-editing input,
+.tabulator-row .tabulator-cell.tabulator-editing select {
+  padding: .5rem .7rem;
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.tabulator-row .tabulator-cell.tabulator-validation-fail { border: 1px solid var(--err); }
+
+.tabulator .tabulator-footer {
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  border-top: 1px solid var(--line);
+}
+.tabulator .tabulator-footer .tabulator-page {
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+.tabulator .tabulator-footer .tabulator-page:not(disabled):hover { color: var(--on-accent); background: var(--accent); }
+.tabulator .tabulator-footer .tabulator-page.active { color: var(--on-accent); background: var(--accent); }
+.tabulator .tabulator-footer .tabulator-page:disabled { opacity: .5; }
+.tabulator .tabulator-footer .tabulator-page-size { color: var(--fg); background: var(--bg-elev); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+
+/* 下拉選單（list 編輯器、標題篩選） */
+.tabulator-edit-list { color: var(--fg); background: var(--bg-elev); border: 1px solid var(--line-strong); box-shadow: var(--shadow-2); }
+.tabulator-edit-list .tabulator-edit-list-item { color: var(--fg); }
+.tabulator-edit-list .tabulator-edit-list-item.active { color: var(--on-accent); background: var(--accent); }
+.tabulator-edit-list .tabulator-edit-list-item:hover { color: var(--on-accent); background: var(--accent); }
+.tabulator-edit-list .tabulator-edit-list-notice { color: var(--fg-muted); }
