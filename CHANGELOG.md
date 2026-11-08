@@ -6,10 +6,10 @@
 - 重試：429、408、5xx、連線失敗、尚未收到任何字就斷線，最多 3 次，等待 2／4／8 秒（尊重 `Retry-After`）；401、402、404 等不重試；已經吐出字之後斷線不重試（會重複）。
 - 取消：`should_stop` 在背景執行緒讀取、主執行緒每 0.2 秒檢查；按停止會切斷連線（本機模型也跟著停）並丟出 `Cancelled`。介面任務傳 `lambda: job.stopping`。
 - token 估算：`estimate_tokens()`、`estimate_messages()`、`context_left()`、`check_context()`；中日韓字乘 `cjk_token_ratio`（沒設定時 DeepSeek 0.6、其他 1.2）。
-- providers 沿用 Novel Studio 的欄位（`base_url`、`model`、`key_env`、`context_tokens`、`max_output`、`temperature`、`json_mode`、`extra`、`reasoning`）；`find_provider()` 依 指定 → `stage_providers` → `default_provider` 選。金鑰只讀環境變數（不做金鑰庫）。
+- providers 沿用 Novel Studio 的欄位（`base_url`、`model`、`key_env`、`context_tokens`、`max_output`、`temperature`、`json_mode`、`extra`、`reasoning`）；`find_provider()` 依 指定 → `stage_providers` → `default_provider` 選。金鑰來源：環境變數 → 系統金鑰庫（服務 `novel-studio`、帳號 = provider id，與另外兩個專案共用，只讀不寫；需要 `pip install keyring`，沒裝就略過）。`list_models()` 也會先檢查金鑰。
 - 新增 `tools/llm_check.py`：對每個 provider 要一份 JSON；`--stop-after N` 測停止；`--models` 列模型。
 - 資料格式沒有變動；`config.json` 沒有新欄位（`reasoning` 為選填，格式同 Novel Studio）。
-- 測試：新增 `tests/test_llm.py` 37 項（本機假伺服器）；雲端 Linux 全過。
+- 測試：新增 `tests/test_llm.py` 39 項（本機假伺服器）；雲端 Linux 全過。
 
 ## 0.3.0 — 2026-11-08（S3：嵌字）
 

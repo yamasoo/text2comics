@@ -4,9 +4,9 @@
 
 ### S4 做了什麼
 
-- `t2c/llm.py`：OpenAI 相容 Chat Completions（DeepSeek、llama.cpp 的 llama-server）。`find_provider(cfg, provider_id, stage)`、`chat()`（串流、`on_delta`／`on_thinking`、重試、`should_stop`）、`chat_json()`、`parse_json()`、`estimate_tokens()`／`check_context()`。providers 欄位與 Novel Studio 相同；金鑰只讀環境變數 `key_env`。
+- `t2c/llm.py`：OpenAI 相容 Chat Completions（DeepSeek、llama.cpp 的 llama-server）。`find_provider(cfg, provider_id, stage)`、`chat()`（串流、`on_delta`／`on_thinking`、重試、`should_stop`）、`chat_json()`、`parse_json()`、`estimate_tokens()`／`check_context()`。providers 欄位與 Novel Studio 相同；金鑰先讀環境變數 `key_env`，再讀系統金鑰庫（服務 `novel-studio`、帳號 = provider id，和另外兩個專案共用，只讀不寫，需要 `pip install keyring`）。
 - `tools/llm_check.py`：對每個 provider 要一份 JSON；`--stop-after N` 測停止；`--models` 列模型。
-- `tests/test_llm.py` 37 項，用本機假伺服器（SSE、429／5xx、斷線、慢速串流、取消），雲端 Linux 全過。
+- `tests/test_llm.py` 39 項，用本機假伺服器（SSE、429／5xx、斷線、慢速串流、取消），雲端 Linux 全過。
 - 資料格式與 `config.json` 沒有新欄位（`reasoning` 為選填）。細節見 `CHANGELOG.md` 0.4.0 與 `docs/03_建置與環境.md` 第 5 節。
 
 ### S4 的決定

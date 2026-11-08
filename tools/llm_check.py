@@ -2,7 +2,7 @@
 
   python tools/llm_check.py                       # 檢查所有 provider
   python tools/llm_check.py --provider llamacpp   # 只查一個
-  python tools/llm_check.py --stop-after 5        # 收到 5 個字就按停止，確認會中斷（長一點的回答才看得出來）
+  python tools/llm_check.py --stop-after 5        # 收到 5 個字（思考或正文都算）就按停止，確認會中斷（長一點的回答才看得出來）
   python tools/llm_check.py --models              # 列出伺服器提供的模型名稱
 
 DeepSeek 要先設環境變數 DEEPSEEK_API_KEY；llama.cpp 要先啟動 llama-server。
@@ -43,9 +43,9 @@ def check(prov, stop_after, show_models):
                 stop["flag"] = True
 
         try:
-            llm.chat(prov, LONG_PROMPT, on_delta=on_delta, should_stop=lambda: stop["flag"], max_tokens=800)
+            llm.chat(prov, LONG_PROMPT, on_delta=on_delta, on_thinking=on_delta, should_stop=lambda: stop["flag"], max_tokens=800)
         except llm.Cancelled:
-            print("   ✓ 已中斷：收到 %d 字後停止，花 %.1f 秒" % (len("".join(got)), time.monotonic() - t0))
+            print("   ✓ 已中斷：收到 %d 字（含思考）後停止，花 %.1f 秒" % (len("".join(got)), time.monotonic() - t0))
             return True
         except llm.LLMError as err:
             print("   ✗ %s" % err)

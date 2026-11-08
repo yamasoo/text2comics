@@ -137,7 +137,27 @@ def test_json_mode_off_and_no_key_for_local(serve):
     assert "response_format" not in body and "Authorization" not in headers
 
 
-def test_missing_key_for_remote_is_clear_error():
+def test_key_from_env_then_keyring(monkeypatch):
+    p = {"id": "deepseek", "key_env": "T2C_TEST_KEY2"}
+    monkeypatch.delenv("T2C_TEST_KEY2", raising=False)
+    asked = []
+    monkeypatch.setattr(llm, "_keyring_get", lambda account: asked.append(account) or "sk-ring")
+    assert llm.api_key(p) == "sk-ring" and asked == ["deepseek"]
+    monkeypatch.setenv("T2C_TEST_KEY2", "sk-env")
+    assert llm.api_key(p) == "sk-env" and asked == ["deepseek"]       # 環境變數優先，不去問金鑰庫
+    asked.clear()
+    assert llm.api_key({"id": "llamacpp", "key_env": ""}) == "" and asked == []   # 本機服務不查金鑰庫
+
+
+def test_list_models_checks_key_first(monkeypatch):
+    monkeypatch.setattr(llm, "_keyring_get", lambda account: "")
+    p = {"id": "d", "base_url": "https://api.deepseek.com", "key_env": "T2C_NOT_SET_KEY"}
+    with pytest.raises(llm.LLMError, match="沒有金鑰"):
+        llm.list_models(p)
+
+
+def test_missing_key_for_remote_is_clear_error(monkeypatch):
+    monkeypatch.setattr(llm, "_keyring_get", lambda account: "")
     p = {"id": "d", "name": "DeepSeek", "base_url": "https://api.deepseek.com", "key_env": "T2C_NOT_SET_KEY"}
     with pytest.raises(llm.LLMError, match="T2C_NOT_SET_KEY"):
         llm.chat(p, MSG)

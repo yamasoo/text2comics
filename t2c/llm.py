@@ -74,10 +74,25 @@ def find_provider(cfg, provider_id=None, stage=None):
     raise LLMError("找不到 provider「%s」（現有：%s）" % (wanted, "、".join(str(p.get("id")) for p in provs)))
 
 
+KEYRING_SERVICE = "novel-studio"   # 與 Novel Studio、text_2_visual_novel 共用同一個系統金鑰庫項目（只讀不寫）
+
+
+def _keyring_get(account):
+    """讀系統金鑰庫（Windows 認證管理員等）。沒裝 keyring 或沒有這筆就回傳空字串。"""
+    try:
+        import keyring
+        return (keyring.get_password(KEYRING_SERVICE, account) or "").strip()
+    except Exception:
+        return ""
+
+
 def api_key(prov):
-    """金鑰只從環境變數讀（`key_env`）。本機服務可以不設。"""
+    """金鑰來源：環境變數（`key_env`）→ 系統金鑰庫（服務 novel-studio、帳號 = provider id）。
+    沒有 `key_env` 的 provider（本機 llama.cpp）不需要金鑰。金鑰絕不寫進檔案。"""
     env = prov.get("key_env")
-    return os.environ.get(env, "").strip() if env else ""
+    if not env:
+        return ""
+    return os.environ.get(env, "").strip() or _keyring_get(prov.get("key_id") or prov.get("id") or "")
 
 
 def _is_local(url):
@@ -109,7 +124,8 @@ def _headers(prov):
 def _check_key(prov):
     env = prov.get("key_env")
     if env and not api_key(prov) and not _is_local(prov.get("base_url") or ""):
-        raise LLMError("沒有金鑰：請設定環境變數 %s（金鑰不要寫進任何檔案）" % env)
+        raise LLMError("沒有金鑰：請設定環境變數 %s，或把金鑰存進系統金鑰庫（需要 pip install keyring；服務 %s、帳號 %s）。金鑰不要寫進任何檔案"
+                       % (env, KEYRING_SERVICE, prov.get("id")))
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +396,7 @@ def chat(prov, messages, json_mode=False, max_tokens=None, stage=None, temperatu
 
 
 def list_models(prov, timeout=15):
+    _check_key(prov)
     req = urllib.request.Request(_endpoint(prov, "/models"), headers=_headers(prov))
     try:
         with _opener(req.full_url).open(req, timeout=timeout) as resp:

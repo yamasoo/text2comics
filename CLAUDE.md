@@ -40,7 +40,7 @@
 6. 長工作（出圖、LLM）一律用 `JobRunner` 背景任務，迴圈裡呼叫 `job.checkpoint()`。
 7. `vendor/fekit/` 不要改；升級用 `E:\dev\front-end\tools\sync_kit.py`。
 8. 介面文字與文件用繁體中文（台灣用語），不可出現簡體字。生圖提示詞用英文；要畫進圖裡的字保留原文。
-9. 金鑰不寫進任何檔案：DeepSeek 用環境變數 `DEEPSEEK_API_KEY`；`config.json` 不進版控。
+9. 金鑰不寫進任何檔案：DeepSeek 先讀環境變數 `DEEPSEEK_API_KEY`，沒有再讀系統金鑰庫（服務 `novel-studio`、帳號 `deepseek`，與 Novel Studio、t2vn 共用；只讀不寫，需要 `pip install keyring`）；`config.json` 不進版控。
 
 ## 5. 工作流程
 
