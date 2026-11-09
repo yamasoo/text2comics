@@ -9,25 +9,46 @@
 import re
 
 from . import layout
-from .compile import ANGLE, BUBBLE_KINDS, SHOT, side_of_frame
+from .compile import ANGLE, BUBBLE_KINDS, OFFSCREEN_KINDS, SHOT, side_of_frame
+from . import script as sc
 from .script import Issue, MAX_BUBBLES, resolve_speaker
 
 CJK = re.compile(r"[㐀-鿿豈-﫿　-〿＀-￯]")
-# 外觀只能來自視覺聖經（CLAUDE.md 規則 3），scene／pose／expression 不准重寫外觀
+# 外觀只能來自視覺聖經（CLAUDE.md 規則 3），scene／pose／expression 不准重寫外觀。
+# M1 修正 L-1：補髮色髮型、眼鏡、鬍子、光頭；「wearing 道具」（耳機、背包…）放行；單獨出現的衣物名詞只提醒（脫外套這類動作是合理的）。
+CLOTHES = (r"uniforms?|dress|dresses|gowns?|coats?|lab coat|jackets?|blazers?|shirts?|t-shirts?|blouses?|hoodies?|sweaters?|"
+           r"cardigans?|vests?|skirts?|trousers|pants|jeans|shorts|suits?|spacesuits?|jumpsuits?|coveralls|overalls|"
+           r"aprons?|kimonos?|robes?|scarf|scarves|hats?|caps?|beanies?|neckties?|ties")
+PROPS = re.compile(r"^\W*(an?|the|his|her|their)?\s*([a-z-]+\s+){0,2}(headsets?|headphones|earpieces?|earphones|backpacks?|bags?|"
+                   r"satchels?|tool ?belts?|holsters?|name ?tags?|badges?|lanyards?|oxygen masks?|breathing masks?|"
+                   r"gas masks?|wristwatch(es)?|watch(es)?)\b", re.I)
+HAIR_WORDS = (r"black|brown|blond|blonde|white|silver|gr[ae]y|red|pink|blue|green|dark|light|auburn|ginger|golden|"
+              r"platinum|long|short|shoulder-length|messy|curly|straight|wavy|tousled|spiky|shaggy|cropped|slicked-back|braided")
 APPEARANCE = [
-    (re.compile(r"\b(wears?|wearing|dressed in)\b", re.I), "服裝"),
-    (re.compile(r"\b(black|brown|blond|blonde|white|silver|gr[ae]y|red|pink|blue|green|long|short|messy|curly|straight|wavy)[ -](haired|hair|eyes)\b", re.I), "髮型或眼睛"),
-    (re.compile(r"\b(bangs|ponytail|pigtails|braids?)\b", re.I), "髮型"),
+    (re.compile(r"\b(%s)[ -](haired|hair|eyes)\b" % HAIR_WORDS, re.I), "髮型或眼睛"),
+    (re.compile(r"\b(bangs|fringe|ponytail|pigtails|twin ?tails|braids?|buzz ?cut|crew ?cut|bob cut|hair bun|top ?knot|mohawk)\b", re.I), "髮型"),
+    (re.compile(r"\b(bald|balding|shaved head)\b", re.I), "髮型"),
+    (re.compile(r"\b(beard|bearded|mustache|moustache|goatee|sideburns|stubble)\b", re.I), "臉部特徵"),
+    (re.compile(r"(?<!wine )(?<!drinking )(?<!water )(?<!beer )\b(eye)?glasses\b(?! of)|\bspectacles\b|\bsunglasses\b", re.I), "眼鏡"),
+    (re.compile(r"\bin (an?|his|her|their) ([a-z-]+ ){0,3}(%s)\b(?![ -]?(sleeves?|pockets?|zippers?|collars?|hoods?|buttons?|cuffs?))" % CLOTHES, re.I), "服裝"),
 ]
+WEAR = re.compile(r"\b(wears?|wearing|dressed in)\b", re.I)
+CLOTHES_WORD = re.compile(r"\b(%s)\b" % CLOTHES, re.I)
 
 PANEL_KEYS = {"slot", "id", "shot", "angle", "location", "scene", "characters", "objects", "sfx", "bubbles", "seeds"}
 CHAR_KEYS = {"id", "outfit", "pose", "expression", "box"}
-BUBBLE_KEYS = {"kind", "speaker", "text", "anchor"}
+BUBBLE_KEYS = {"kind", "speaker", "text", "anchor", "offscreen"}
 
 VOICE_KINDS = {"speech", "shout", "whisper"}   # 劇本沒標語氣的台詞，分鏡可以在這三種裡選
 COLUMN_CHARS = 12            # 對話框每一行（直排是每一欄）最多幾個字；超過要加 \n
 COLUMN_CHARS_NARRATION = 16
 HEAD_CHARS = 8               # 第一行（欄）建議的上限，只做提醒
+
+
+def shown(text, limit=12):
+    """錯誤訊息裡引用台詞：換行顯示成 ⏎（不然命令列與日誌會斷行），太長就截斷。"""
+    t = str(text if text is not None else "").replace("\r\n", "\n").replace("\n", "⏎")
+    return t if limit is None or len(t) <= limit else t[:limit] + "…"
 
 
 def _where(page, slot):
@@ -57,11 +78,15 @@ def _english(value, label, where, issues):
 def _appearance(value, label, where, issues):
     if not isinstance(value, str):
         return
-    for pattern, kind in APPEARANCE:
-        m = pattern.search(value)
-        if m:
-            issues.append(Issue("error", where, "%s 裡的「%s」像是在描述角色%s。外觀只能由視覺聖經提供，這裡只寫動作與畫面，人物用 the young woman／the young man 之類的代稱" % (label, m.group(0), kind)))
-            return
+    found = [(m, "服裝") for m in WEAR.finditer(value) if not PROPS.match(value[m.end():])]     # wearing a headset 是道具，放行
+    found += [(m, kind) for pattern, kind in APPEARANCE for m in [pattern.search(value)] if m]
+    if found:
+        m, kind = min(found, key=lambda f: f[0].start())
+        issues.append(Issue("error", where, "%s 裡的「%s」像是在描述角色%s。外觀只能由視覺聖經提供（換衣服用 outfit id），這裡只寫動作與畫面，人物用 the young woman／the young man 之類的代稱" % (label, m.group(0), kind)))
+        return
+    m = CLOTHES_WORD.search(value)
+    if m:
+        issues.append(Issue("warn", where, "%s 提到衣物「%s」：衣著由聖經的 outfits 提供；如果是動作的對象（脫下外套、拉上拉鍊）可以不管，如果是在描述穿著請拿掉" % (label, m.group(0))))
 
 
 def column_issues(text, kind, where):
@@ -71,7 +96,7 @@ def column_issues(text, kind, where):
     for seg in str(text).split("\n"):
         n = len(re.sub(r"\s", "", seg))
         if n > limit:
-            out.append(Issue("error", where, "台詞「%s…」有一行 %d 個字，超過 %d 字。請在詞與詞之間加換行 \\n（例如「對不起！\\n排隊排到一半\\n被教授抓去搬東西！」），每行 %d 字左右" % (seg[:8], n, limit, HEAD_CHARS + 2)))
+            out.append(Issue("error", where, "台詞「%s」有一行 %d 個字，超過 %d 字。請在詞與詞之間加換行 \\n（例如「對不起！\\n排隊排到一半\\n被教授抓去搬東西！」），每行 %d 字左右" % (shown(seg, 8), n, limit, HEAD_CHARS + 2)))
             break
     return out
 
@@ -184,20 +209,57 @@ def check_panel(project, page_no, panel):
             issues.append(Issue("error", where, "對話框的 text 不能是空的"))
         else:
             issues += column_issues(text, kind, where)
-        speaker = b.get("speaker")
+        speaker, offscreen = b.get("speaker"), b.get("offscreen", False)
+        if not isinstance(offscreen, bool):
+            issues.append(Issue("error", where, "「%s」的 offscreen 只能是 true 或 false" % shown(text)))
+            offscreen = False
         if kind == "narration":
             if speaker:
                 issues.append(Issue("error", where, "旁白不要寫 speaker"))
+            if offscreen:
+                issues.append(Issue("error", where, "旁白不要寫 offscreen"))
         elif not speaker:
-            issues.append(Issue("error", where, "「%s」缺少 speaker（角色 id）" % str(text)[:12]))
+            issues.append(Issue("error", where, "「%s」缺少 speaker（角色 id）" % shown(text)))
         elif speaker not in project.characters:
             issues.append(Issue("error", where, "說話的角色「%s」不在 bible/characters" % speaker))
+        elif offscreen:
+            if kind not in OFFSCREEN_KINDS:
+                issues.append(Issue("error", where, "「%s」：%s 的對話框不能 offscreen（心聲要看得到人）。要嘛把 %s 畫進這一格，要嘛改成 speech／radio" % (shown(text), kind, speaker)))
+            if speaker in cast:
+                issues.append(Issue("error", where, "「%s」標了 offscreen，但 %s 列在這一格的 characters 裡（會被畫出來）。人不在畫面上就從 characters 拿掉" % (shown(text), speaker)))
         elif speaker not in cast:
-            issues.append(Issue("error", where, "「%s」說話，但 %s 不在這一格的 characters 裡。請把他加進 characters（不在畫面中央也可以，框放在畫面邊緣）" % (str(text)[:12], speaker)))
+            issues.append(Issue("error", where, "「%s」說話，但 %s 不在這一格的 characters 裡。人在畫面外、或透過通訊從別處說話，就在這個對話框加 \"offscreen\": true（通訊用 kind \"radio\"），**不要**把他加進 characters；人就在畫面上，才加進 characters" % (shown(text), speaker)))
         anchor = b.get("anchor")
         if not (isinstance(anchor, (list, tuple)) and len(anchor) == 2 and all(_is_num(v) and 0 <= v <= 1 for v in anchor)):
             issues.append(Issue("error", where, "anchor 要是 [x, y]，兩個 0–1 的比例，目前是 %r" % (anchor,)))
+    issues += anchor_order_issues(bubbles, where)
     return issues
+
+
+def anchor_order_issue(first, later):
+    """右翻閱讀：later 的 anchor 會不會比 first 先讀到（M1 修正 M-2；和 letter.order_conflict 同一個想法，只是這裡只有中心點）。"""
+    dx, dy = later[0] - first[0], later[1] - first[1]
+    if dy < -0.3:                        # 明顯在上面
+        return True
+    if dy < -0.05 and dx > 0.05:         # 跑到右上方
+        return True
+    return abs(dy) <= 0.08 and dx > 0.15  # 差不多高、在右邊
+
+
+def anchor_order_issues(bubbles, where):
+    """對話框依閱讀順序排列，anchor 的位置卻顛倒時提醒（嵌字會盡量照順序擺，但 anchor 錯得多時會拉不回來）。"""
+    out, seen = [], []
+    for index, b in enumerate(bubbles, 1):
+        anchor = b.get("anchor") if isinstance(b, dict) else None
+        if not (isinstance(anchor, (list, tuple)) and len(anchor) == 2 and all(_is_num(v) for v in anchor)):
+            continue
+        for prev_index, prev in seen:
+            if anchor_order_issue(prev, anchor):
+                out.append(Issue("warn", where, "第 %d 個對話框「%s」的 anchor 在第 %d 個的右邊或上面，右翻會先讀到它。先讀的放右上，後讀的往左、往下"
+                                 % (index, shown(b.get("text")), prev_index)))
+                break
+        seen.append((index, anchor))
+    return out
 
 
 def check_page_panels(project, page_no, template_key, panels, pages_data):
@@ -235,14 +297,16 @@ def check_against_script(project, page_no, panels, script_page):
             free = w.kind == "speech" and kind in VOICE_KINDS          # 劇本沒標語氣：分鏡可以判斷成喊叫或小聲
             if kind != w.kind and not free:
                 want_kind = w.kind if w.kind != "speech" else "speech、shout 或 whisper 其中之一"
-                issues.append(Issue("error", where, "第 %d 個對話框：劇本是「%s」，kind 要是 %s（目前是 %s）" % (i, w.text[:12], want_kind, kind)))
+                issues.append(Issue("error", where, "第 %d 個對話框：劇本是「%s」，kind 要是 %s（目前是 %s）" % (i, shown(w.text), want_kind, kind)))
+            if w.offscreen and h.get("offscreen") is not True:
+                issues.append(Issue("error", where, "第 %d 個對話框：劇本標了（畫面外），對話框要加 \"offscreen\": true，說話的人也不要列進 characters" % i))
             if w.speaker:
                 cid = resolve_speaker(project, w.speaker)
                 if cid and h.get("speaker") != cid:
                     issues.append(Issue("error", where, "第 %d 個對話框：劇本由「%s」說，speaker 要是 %s（目前是 %s）" % (i, w.speaker, cid, h.get("speaker"))))
             a, b = re.sub(r"\s+", "", w.text), re.sub(r"\s+", "", str(h.get("text") or ""))
             if a != b:
-                issues.append(Issue("error", where, "第 %d 個對話框的台詞和劇本不同。劇本：「%s」；分鏡：「%s」。台詞必須逐字照劇本，只能加換行 \\n" % (i, w.text, h.get("text"))))
+                issues.append(Issue("error", where, "第 %d 個對話框的台詞和劇本不同。劇本：「%s」；分鏡：「%s」。台詞必須逐字照劇本，只能加換行 \\n" % (i, shown(w.text, None), shown(h.get("text"), None))))
         want_sfx = [l.text for l in sp.lines if l.kind == "sfx"]
         have_sfx = [str(s.get("text")) for s in (panel.get("sfx") or []) if isinstance(s, dict)]
         if want_sfx != have_sfx:
@@ -262,9 +326,23 @@ def check_against_script(project, page_no, panels, script_page):
 MAX_PAGES = 60
 
 
-def check_plan(project, plan, pages_data, want_pages=None):
-    """改編規劃（plan/chNNN.json）。"""
+PLAN_SOURCE_PREFIX = re.compile(r"^\s*(原著依據|原著|原文|依據)\s*[：:]\s*")
+PLAN_SOURCE_SPLIT = re.compile(r"……|\.\.\.|…|⋯|／|/")
+
+
+def plan_source_issue(source_norm, quote):
+    """規劃的 source（原著依據）在原著裡找不到時回傳提醒文字（M1 修正 L-4）。可以用「……」省略中間，各段分開比。"""
+    text = PLAN_SOURCE_PREFIX.sub("", str(quote or "")).strip().strip("「」『』“”\"'")
+    parts = [sc.normalize(p) for p in PLAN_SOURCE_SPLIT.split(text)]
+    parts = [p for p in parts if len(p) >= 4]                # 太短的片段（人名、兩三個字）比對沒有意義
+    missing = [p for p in parts if p not in source_norm]
+    return missing
+
+
+def check_plan(project, plan, pages_data, want_pages=None, source=None):
+    """改編規劃（plan/chNNN.json）。source：原著全文，有給就比對每格的 source（找不到只提醒）。"""
     issues = []
+    source_norm = sc.normalize(source) if source else None
     if not isinstance(plan, dict) or not isinstance(plan.get("pages"), list) or not plan["pages"]:
         return [Issue("error", "", "最外層要是 {\"title\":…, \"pages\":[…]}，而且 pages 不能是空的")]
     n = len(plan["pages"])
@@ -305,4 +383,6 @@ def check_plan(project, plan, pages_data, want_pages=None):
             loc = p.get("location")
             if loc and loc not in project.locations:
                 issues.append(Issue("error", w, "地點「%s」不在 bible/locations；沒有合適的地點就省略" % loc))
+            if source_norm and str(p.get("source") or "").strip() and plan_source_issue(source_norm, p.get("source")):
+                issues.append(Issue("warn", w, "原著依據「%s」在原著裡找不到（可能是改寫或編出來的）；請對照原著，source 要引原文" % shown(p.get("source"), 20)))
     return issues

@@ -9,8 +9,8 @@ import json
 import math
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-PAGES_FILE = ROOT / "layouts" / "pages.json"
+DATA = Path(__file__).resolve().parent / "data"      # 套件自帶的資料：整包搬走也讀得到（M1 修正 M-3）
+PAGES_FILE = DATA / "pages.json"
 
 MOSS_COORD_SPACE = "abs_centralized"
 MOSS_BBOX_FORMAT = "yxyx"

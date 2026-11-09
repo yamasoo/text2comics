@@ -2,7 +2,7 @@
 
 資料與規則見 docs/02_資料格式.md 第 8、9 節：
 - picks/chNNN.json 記每格選哪張候選（image）與裁切焦點（focus、zoom）。
-- 格子位置來自 layouts/pages.json 的模板（比例），換算成像素只在 layout.panel_rect_px() 做。
+- 格子位置來自 t2c/data/pages.json 的模板（比例），換算成像素只在 layout.panel_rect_px() 做。
 - 只用標準函式庫與 Pillow（核心規則：不依賴 FastAPI、fekit）。
 """
 import json
@@ -165,7 +165,7 @@ def page_panels(project, chapter, page, pages_data, picks):
       "focus", "zoom", "window"（裁切範圍，原圖比例；沒有圖時是 [0, 0, 1, 1]）}]、warnings。"""
     tpl = pages_data["templates"].get(str(page.get("template")))
     if tpl is None:
-        raise ComposeError("第 %s 頁：沒有這個格子模板「%s」（見 layouts/pages.json）" % (page.get("page"), page.get("template")))
+        raise ComposeError("第 %s 頁：沒有這個格子模板「%s」（見 t2c/data/pages.json）" % (page.get("page"), page.get("template")))
     boxes = tpl["panels"]
     panels = {p.get("slot"): p for p in page.get("panels") or []}
     if sorted(panels) != list(range(1, len(boxes) + 1)):

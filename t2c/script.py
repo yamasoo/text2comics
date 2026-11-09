@@ -9,6 +9,8 @@
     - 旁白：十二點四十分。
     - 曉雨：……又不接。
     - 曉雨（心聲）：……記得這種事幹嘛。
+    - 阿哲（通訊）：收到。          ← 透過機器傳來的聲音：radio，說話的人不在這一格
+    - 阿哲（畫面外、喊）：快跑！    ← 說話的人不在這一格的畫面裡：offscreen
     - 狀聲詞：碰！
 
 只用標準函式庫與 PyYAML，不依賴 FastAPI／fekit。
@@ -25,6 +27,10 @@ SHOT_WORDS = {"大遠景": "extreme_wide", "遠景": "wide", "全身": "full", "
 ANGLE_WORDS = {"平視": "eye", "俯視": "high", "仰視": "low", "鳥瞰": "bird", "斜角": "dutch", "過肩": "over_shoulder"}
 # 台詞後面括號裡的語氣 → 對話框種類
 MARKS = {"心聲": "thought", "喊": "shout", "喊叫": "shout", "小聲": "whisper", "悄聲": "whisper"}
+# 聲音來源（M1 修正）：透過機器傳來 → radio；人不在這一格的畫面裡 → offscreen。可以和語氣用「、」併寫
+RADIO_MARKS = ("通訊", "電話", "廣播", "無線電")
+OFFSCREEN_MARKS = ("畫面外",)
+MARK_SPLIT = re.compile(r"[、，,／/\s]+")
 NARRATOR = "旁白"
 SFX_LABELS = ("狀聲詞", "音效")
 NO_LINES = {"無台詞", "無對白", "沒有台詞"}
@@ -56,9 +62,10 @@ def errors(issues):
 
 @dataclass
 class ScriptLine:
-    kind: str                   # narration | speech | thought | shout | whisper | sfx
+    kind: str                   # narration | speech | thought | shout | whisper | radio | sfx
     speaker: str = ""           # 劇本裡寫的名字（旁白、狀聲詞為空）
     text: str = ""
+    offscreen: bool = False     # （畫面外）：說話的人不在這一格的畫面裡（radio 由分鏡決定，見資料格式第 5 節）
 
 
 @dataclass
@@ -123,13 +130,35 @@ def _parse_bullet(content, where, issues):
         return ScriptLine("narration", "", text)
     if name in SFX_LABELS:
         return ScriptLine("sfx", "", text)
-    kind = "speech"
-    if mark:
-        kind = MARKS.get(mark)
-        if kind is None:
-            issues.append(Issue("error", where, "不認得的語氣「%s」（可用：%s）" % (mark, "、".join(sorted(MARKS)))))
-            kind = "speech"
-    return ScriptLine(kind, name, text)
+    kind, offscreen = _parse_marks(mark, where, issues)
+    return ScriptLine(kind, name, text, offscreen)
+
+
+def _parse_marks(mark, where, issues):
+    """括號裡的標記 → (kind, offscreen)。「畫面外、喊」這種併寫用「、」分開。"""
+    kind, offscreen, tones, radio = "speech", False, [], False
+    for word in [w for w in MARK_SPLIT.split(mark or "") if w]:
+        if word in MARKS:
+            tones.append(word)
+        elif word in RADIO_MARKS:
+            radio = True
+        elif word in OFFSCREEN_MARKS:
+            offscreen = True
+        else:
+            issues.append(Issue("error", where, "不認得的標記「%s」（語氣可用：%s；聲音來源可用：%s）"
+                                % (word, "、".join(MARKS), "、".join(RADIO_MARKS + OFFSCREEN_MARKS))))
+    if len(tones) > 1:
+        issues.append(Issue("error", where, "語氣只能標一個，目前是：%s" % "、".join(tones)))
+    if tones:
+        kind = MARKS[tones[0]]
+    if radio:
+        if tones or offscreen:
+            issues.append(Issue("error", where, "（通訊）（電話）這類透過機器的聲音一律用電子音對話框，不能再加%s" % "、".join(tones + (["畫面外"] if offscreen else []))))
+        return "radio", False
+    if offscreen and kind == "thought":
+        issues.append(Issue("error", where, "心聲要看得到想的人，不能和（畫面外）併用"))
+        offscreen = False
+    return kind, offscreen
 
 
 def split_pages(body):
@@ -258,14 +287,37 @@ def source_quotes(source):
     return [q.strip() for q in QUOTE_RE.findall(source or "") if len(normalize(q)) >= 3]
 
 
+SENTENCE_END = re.compile(r"[。！？!?；;…⋯\n]+")
+SHORT_PART = 4           # 比這短的片段（是我、好、等一下）在原著裡到處都是子字串，要和原著某一句「整句相同」才算
+
+
+def source_sentences(source):
+    """原著引號內台詞依句讀拆開後的每一句（已 normalize）。"""
+    return {n for q in QUOTE_RE.findall(source or "") for n in (normalize(p) for p in SENTENCE_END.split(q)) if n}
+
+
+def found_in(src_norm, line, sentences=None):
+    """台詞能不能在原著找到：先整句比；找不到再依句讀拆開逐句比（M1 修正 L-3：兩句原文併成一個對話框不算改寫）。
+    長片段只要是原著的子字串；短片段要和原著某一句整句相同（sentences，見 source_sentences）。"""
+    whole = normalize(line)
+    if not whole or whole in src_norm:
+        return True
+    parts = [p for p in (normalize(x) for x in SENTENCE_END.split(line)) if p]
+    if len(parts) < 2:
+        return False
+    sentences = sentences or set()
+    return all((p in src_norm) if len(p) >= SHORT_PART else (p in sentences) for p in parts)
+
+
 def fidelity(source, pages):
     """劇本對原著的忠實度（粗略，供人工審閱）：
     - 劇本的台詞有幾句能在原著找到（逐字，不計標點）；找不到的列出來，可能是改寫或新增；
     - 原著引號內的台詞有幾句沒進劇本（被刪或被改寫）。"""
     src = normalize(source)
-    dialogue = [l for p in pages for pn in p.panels for l in pn.lines if l.kind in ("speech", "thought", "shout", "whisper")]
+    dialogue = [l for p in pages for pn in p.panels for l in pn.lines if l.kind in ("speech", "thought", "shout", "whisper", "radio")]
     script_text = normalize("".join(l.text for p in pages for pn in p.panels for l in pn.lines))
-    not_in_source = [l.text for l in dialogue if normalize(l.text) and normalize(l.text) not in src]
+    sentences = source_sentences(source)
+    not_in_source = [l.text for l in dialogue if normalize(l.text) and not found_in(src, l.text, sentences)]
     quotes = source_quotes(source)
     missing = [q for q in quotes if normalize(q) not in script_text]
     return {

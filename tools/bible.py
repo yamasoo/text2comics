@@ -85,7 +85,7 @@ def print_prompt(messages):
 
 
 def make_builder(args, proj):
-    cfg = settings.load(args.config)
+    cfg = settings.load(args.config, root=ROOT)
     return bible.Builder(proj, prov_for=lambda key: llm.find_provider(cfg, provider_id=args.provider, stage=key),
                          on_event=show, max_fix=args.max_fix,
                          on_delta=(lambda t: print(t, end="", flush=True)) if getattr(args, "stream", False) else None), cfg
@@ -177,7 +177,7 @@ def cmd_sheet(args, proj):
         proj.root / "build" / "bible"))
     if not args.render:
         return 0
-    cfg = settings.load(args.config)
+    cfg = settings.load(args.config, root=ROOT)
     chosen, preset, _ = bible.resolve_preset(cfg, args.preset)
     if chosen:
         print("出圖預設：%s%s" % (chosen, "（LoRA %s）" % preset["lora"] if preset and preset.get("lora") else ""))

@@ -36,7 +36,7 @@
   },
   "comfy": {
     "url": "http://127.0.0.1:8188",
-    "workflow": "workflows/moss_layout.api.json",
+    "workflow": "",
     "models": {
       "unet": "moss_image_sft_int8_convrot.safetensors",
       "clip": "qwen3.5_9b_w4a8_gptq.safetensors",

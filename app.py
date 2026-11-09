@@ -28,7 +28,7 @@ from t2c.compile import CompileError, compile_chapter  # noqa: E402
 from t2c.project import Project, ProjectError  # noqa: E402
 
 from server import bible_api, project_api, tasks  # noqa: E402
-from server.common import runner  # noqa: E402
+from server.common import SAMPLE, runner  # noqa: E402
 
 WEB = ROOT / "web"
 FEKIT = ROOT / "vendor" / "fekit"
@@ -41,12 +41,12 @@ fe = install(app, app_name="text2comics", jobs=runner)
 for module in (project_api, bible_api, tasks):
     app.include_router(module.router)
 
-SAMPLE = ROOT / "examples" / "sample_comic"
 
 
 @app.get("/api/info")
 def info():
-    return {"version": T2C_VERSION, "sample": str(SAMPLE)}
+    from t2c.workspace import sample_has_renders
+    return {"version": T2C_VERSION, "sample": str(SAMPLE), "sample_renders": sample_has_renders(SAMPLE)}
 
 
 # ---- 嵌字（S3）：介面拖曳微調 ----------------------------------------------------------
@@ -61,7 +61,7 @@ _SETTINGS = {}
 def _lettering():
     """config.json 的 lettering → letter.Settings；設定檔沒變就重用（找字型要掃資料夾）。"""
     try:
-        cfg = tool_settings.load()
+        cfg = tool_settings.load(root=ROOT)
         key = (cfg["_path"], Path(cfg["_path"]).stat().st_mtime)
         if key not in _SETTINGS:
             _SETTINGS.clear()

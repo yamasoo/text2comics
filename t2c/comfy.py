@@ -1,6 +1,6 @@
 """最小的 ComfyUI API 客戶端（只用標準函式庫）。
 
-workflow 用 API 格式（ComfyUI 選單 Export (API)），預設是 workflows/moss_layout.api.json。
+workflow 用 API 格式（ComfyUI 選單 Export (API)），預設是套件自帶的 t2c/data/moss_layout.api.json（見 workflow_path）。
 要改的節點從 KSampler 往回追：positive／negative 的 CLIPTextEncode、latent 的寬高、seed；
 模型檔名照 config.json 的 comfy.models 覆蓋。步數、CFG、取樣器預設照 workflow；
 傳入 preset（config.json 的 comfy.presets 其中一組）就覆蓋，並可在模型後面接一個 LoRA（見 apply_preset）。
@@ -17,8 +17,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_WORKFLOW = ROOT / "workflows" / "moss_layout.api.json"
+DEFAULT_WORKFLOW = Path(__file__).resolve().parent / "data" / "moss_layout.api.json"
+# 舊的 config.json 寫的是工具資料夾裡的相對路徑；那個檔案已搬進套件，照舊寫法也指到內建的
+LEGACY_WORKFLOWS = {"workflows/moss_layout.api.json", "./workflows/moss_layout.api.json"}
 LOADERS = {"UNETLoader": "unet_name", "CLIPLoader": "clip_name", "VAELoader": "vae_name"}
 MODEL_KEYS = {"UNETLoader": "unet", "CLIPLoader": "clip", "VAELoader": "vae"}
 
@@ -82,6 +83,26 @@ def _req(base, path, data=None, timeout=30, raw=False):
 
 def load_workflow(path=None):
     return json.loads(Path(path or DEFAULT_WORKFLOW).read_text(encoding="utf-8"))
+
+
+def workflow_path(cfg):
+    """工具設定（settings.load() 的結果）裡 comfy.workflow 指的檔案。
+    空的、或舊寫法 workflows/moss_layout.api.json → 套件自帶的；相對路徑以 config.json 所在資料夾為準。"""
+    spec = str(((cfg or {}).get("comfy") or {}).get("workflow") or "").strip()
+    if not spec or spec.replace("\\", "/") in LEGACY_WORKFLOWS:
+        return DEFAULT_WORKFLOW
+    path = Path(spec).expanduser()
+    if not path.is_absolute():
+        base = Path(cfg["_path"]).resolve().parent if cfg.get("_path") else Path.cwd()
+        path = base / path
+    if not path.is_file():
+        raise ComfyError("找不到 workflow：%s（config.json 的 comfy.workflow；留空就用內建的）" % path)
+    return path
+
+
+def config_workflow(cfg):
+    """依工具設定載入 workflow。"""
+    return load_workflow(workflow_path(cfg))
 
 
 def _sampler(wf):

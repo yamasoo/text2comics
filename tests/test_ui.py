@@ -2,6 +2,7 @@
 模型與 ComfyUI 都用假的（不連外網、不需要 GPU）。執行：python -m pytest tests/test_ui.py
 """
 import json
+import shutil
 import re
 import sys
 import threading
@@ -78,7 +79,7 @@ def need_font():
 
 @pytest.fixture
 def cfg(monkeypatch):
-    monkeypatch.setattr(settings, "load", lambda path=None: dict(CFG, _path="test"))
+    monkeypatch.setattr(settings, "load", lambda path=None, root=None: dict(CFG, _path="test"))
     return CFG
 
 
@@ -96,7 +97,7 @@ def fake_comfy(monkeypatch):
 @pytest.fixture
 def comic(tmp_path):
     """從範例新建的專案（不含出圖）。"""
-    return workspace.create_project(str(tmp_path / "comic"), "測試作品", from_sample=True)
+    return workspace.create_project(str(tmp_path / "comic"), "測試作品", sample=SAMPLE)
 
 
 # ---- 核心：workspace ---------------------------------------------------------------
@@ -109,11 +110,21 @@ def test_create_project_new_and_from_sample(tmp_path):
         workspace.create_project(str(tmp_path / "new"), "又一次")                  # 不是空資料夾
     with pytest.raises(workspace.WorkspaceError):
         workspace.create_project("relative/path", "x")                              # 要完整路徑
-    sample = workspace.create_project(str(tmp_path / "s"), "改名", from_sample=True)
+    sample = workspace.create_project(str(tmp_path / "s"), "改名", sample=SAMPLE)
     assert sample.config["title"] == "改名" and not (sample.root / "renders").exists()
     ch = workspace.overview(sample)["chapters"][0]
     assert ch["chapter"] == 1 and ch["script_pages"] == 1 and ch["panels"] == 5 and ch["rendered"] == 0
-    with_renders = workspace.create_project(str(tmp_path / "r"), "", from_sample=True, sample_renders=True)
+    bare = tmp_path / "bare_sample"                                                 # 新 clone 的範例沒有 renders/（不進版控）
+    shutil.copytree(SAMPLE, bare, ignore=shutil.ignore_patterns("renders", "pages", "build", "out"))
+    assert not workspace.sample_has_renders(bare)
+    with pytest.raises(workspace.WorkspaceError, match="範例沒有出圖"):
+        workspace.create_project(str(tmp_path / "r0"), "", sample=bare, sample_renders=True)
+    assert not (tmp_path / "r0").exists() or not any((tmp_path / "r0").iterdir())
+
+
+@pytest.mark.skipif(not workspace.sample_has_renders(SAMPLE), reason="範例的出圖不進版控（examples/sample_comic/renders/），這台電腦沒有")
+def test_create_project_from_sample_with_renders(tmp_path):
+    with_renders = workspace.create_project(str(tmp_path / "r"), "", sample=SAMPLE, sample_renders=True)
     ch = workspace.overview(with_renders)["chapters"][0]
     assert ch["rendered"] == 5 and ch["picked"] == 5
 
@@ -232,7 +243,7 @@ def test_project_api_and_editing(tmp_path, cfg):
 
 def test_render_pick_crop_and_pages(tmp_path, cfg, fake_comfy):
     need_font()
-    root = str(workspace.create_project(str(tmp_path / "c"), "", from_sample=True).root)
+    root = str(workspace.create_project(str(tmp_path / "c"), "", sample=SAMPLE).root)
     first = post("/api/task/render", {"project": root, "chapter": 1, "page": 1}).json()
     done = wait(first["id"])
     assert done["status"] == "done", done
@@ -274,7 +285,7 @@ def test_render_pick_crop_and_pages(tmp_path, cfg, fake_comfy):
 
 def test_export_status_and_download(tmp_path, cfg):
     """S8：頁面 PNG 還沒輸出時不能下載；輸出後 PDF／CBZ（整章與單頁）下載得到，且右翻。"""
-    root = str(workspace.create_project(str(tmp_path / "c"), "", from_sample=True).root)
+    root = str(workspace.create_project(str(tmp_path / "c"), "", sample=SAMPLE).root)
     params = {"project": root, "chapter": 1}
     status = client.get("/api/chapter/pages", params=params).json()["export"]
     assert status["ready"] is False and "還沒有輸出頁面" in status["message"]
@@ -305,7 +316,7 @@ def test_adapt_task_streams_and_saves(tmp_path, cfg, monkeypatch):
     fake = ScriptedLLM(good_replies())
     monkeypatch.setattr(llm, "chat", fake.chat)
     monkeypatch.setattr(llm, "chat_json", fake.chat_json)
-    proj = workspace.create_project(str(tmp_path / "c"), "", from_sample=True)
+    proj = workspace.create_project(str(tmp_path / "c"), "", sample=SAMPLE)
     for sub in ("script", "storyboard"):
         for path in (proj.root / sub).glob("*"):
             path.unlink()
@@ -324,8 +335,8 @@ def test_adapt_task_streams_and_saves(tmp_path, cfg, monkeypatch):
 def test_batch_render_waits_for_local_llm(tmp_path, cfg, fake_comfy, monkeypatch, local_server):
     need_font()
     local = {"id": "llamacpp", "name": "llama.cpp", "base_url": local_server + "/v1", "key_env": ""}
-    monkeypatch.setattr(settings, "load", lambda path=None: dict(CFG, providers=CFG["providers"] + [local], _path="test"))
-    root = str(workspace.create_project(str(tmp_path / "c"), "", from_sample=True).root)
+    monkeypatch.setattr(settings, "load", lambda path=None, root=None: dict(CFG, providers=CFG["providers"] + [local], _path="test"))
+    root = str(workspace.create_project(str(tmp_path / "c"), "", sample=SAMPLE).root)
     stopped = wait(post("/api/task/batch", {"project": root, "chapter": 1, "stages": ["render"]}).json()["id"], answer="stop")
     assert stopped["status"] == "stopped" and fake_comfy == []
     done = wait(post("/api/task/batch", {"project": root, "chapter": 1, "stages": ["render", "pages"]}).json()["id"], answer="anyway")
@@ -345,7 +356,7 @@ def test_render_core_cancel(comic, fake_comfy):
 # ---- API：視覺聖經 ------------------------------------------------------------------
 
 def test_bible_api(tmp_path, cfg, fake_comfy):
-    root = str(workspace.create_project(str(tmp_path / "c"), "", from_sample=True).root)
+    root = str(workspace.create_project(str(tmp_path / "c"), "", sample=SAMPLE).root)
     data = client.get("/api/bible", params={"project": root}).json()
     assert {c["id"] for c in data["cards"] if c["kind"] == "character"} == {"lin", "hao"}
     assert post("/api/bible/new", {"project": root, "kind": "character", "id": "lin", "name": "重複"}).status_code == 400

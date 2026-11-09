@@ -113,7 +113,7 @@ def main(argv=None):
             return 0
         lettering = None
         if not args.no_letter:
-            lettering = letter.Settings.from_config(settings.load(args.config).get("lettering"))
+            lettering = letter.Settings.from_config(settings.load(args.config, root=ROOT).get("lettering"))
         written, warnings = compose.compose_chapter(project, args.chapter, storyboard, only_page=args.page, picks=picks,
                                                     gray=not args.color, numbers=args.numbers, out_dir=args.out,
                                                     lettering=lettering, guides=args.guides)

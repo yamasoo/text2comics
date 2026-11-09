@@ -12,7 +12,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 from t2c import llm, settings  # noqa: E402
 
@@ -73,7 +74,7 @@ def main():
     ap.add_argument("--stop-after", type=int, default=0, help="收到幾個字就按停止")
     ap.add_argument("--models", action="store_true", help="列出伺服器的模型名稱")
     args = ap.parse_args()
-    cfg = settings.load(args.config)
+    cfg = settings.load(args.config, root=ROOT)
     provs = [llm.find_provider(cfg, provider_id=args.provider)] if args.provider else cfg.get("providers", [])
     results = [check(p, args.stop_after, args.models) for p in provs]
     sys.exit(0 if args.models or all(results) else 1)

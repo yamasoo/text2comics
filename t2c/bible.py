@@ -601,7 +601,7 @@ def render_sheets(project, jobs, manifest, cfg, preset_name=None, force=False, s
     """送 ComfyUI 出圖，檔名 renders/bible/<job id>_s<seed>.png（用了非預設的出圖預設會加後綴）。已存在的跳過。回傳寫出的檔名清單。"""
     chosen, preset, default = resolve_preset(cfg, preset_name)
     base = cfg["comfy"]["url"]
-    workflow = comfy.load_workflow(comfy.ROOT / cfg["comfy"].get("workflow", "workflows/moss_layout.api.json"))
+    workflow = comfy.config_workflow(cfg)
     folder = renders_dir(project)
     folder.mkdir(parents=True, exist_ok=True)
     save_sheet_jobs(project, jobs, manifest)

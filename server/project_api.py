@@ -11,7 +11,7 @@ from fekit import ApiError
 
 from t2c import compose, export, gpu, layout, llm, workspace
 
-from .common import body_project, chapter, config, guard
+from .common import SAMPLE, body_project, chapter, config, guard
 from .common import project as open_project
 
 router = APIRouter()
@@ -40,7 +40,7 @@ def _open(path):
 def project_create(body: dict = Body(...)):
     with guard("create_failed"):
         proj = workspace.create_project(body.get("path"), str(body.get("title") or ""), str(body.get("style") or ""),
-                                        from_sample=bool(body.get("from_sample")), sample_renders=bool(body.get("sample_renders")))
+                                        sample=SAMPLE if body.get("from_sample") else None, sample_renders=bool(body.get("sample_renders")))
         return {"root": str(proj.root), "overview": workspace.overview(proj)}
 
 
@@ -194,7 +194,7 @@ def _vocab(proj):
         "templates": {k: {"name": t.get("name", k), "panels": t["panels"]} for k, t in pages_data["templates"].items()},
         "page": {k: pages_data["page"][k] for k in ("width_mm", "height_mm")},
         "shots": list(SHOT), "angles": list(ANGLE),
-        "bubble_kinds": ["speech", "thought", "shout", "whisper", "narration"] if BUBBLE_KINDS else [],
+        "bubble_kinds": ["speech", "thought", "shout", "whisper", "radio", "narration"] if BUBBLE_KINDS else [],
     }
 
 

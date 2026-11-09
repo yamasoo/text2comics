@@ -17,7 +17,7 @@ import json
 from . import layout
 from .compile import ANGLE, BUBBLE_KINDS, SHOT
 from .project import read_front_matter
-from .script import ANGLE_WORDS, MARKS, MAX_BUBBLES, SHOT_WORDS
+from .script import ANGLE_WORDS, MARKS, MAX_BUBBLES, RADIO_MARKS, SHOT_WORDS
 
 SYSTEM = (
     "你是日本漫畫的責任編輯兼分鏡師，負責把小說改編成日式黑白頁漫（由右往左閱讀）。"
@@ -48,8 +48,7 @@ def bible_block(project, with_body=True, with_look=True):
             parts.append("外觀（只供辨識性別年齡，禁止在 scene／pose 複述）：" + _clip(card.get("look_en"), 160))
         lines.append("- " + "｜".join(parts))
         if with_body:
-            body = read_front_matter(card["_path"])[1].strip() if card.get("_path") else ""
-            body = " ".join(l for l in body.split("\n") if l.strip() and not l.lstrip().startswith("-"))
+            body = card_summary(read_front_matter(card["_path"])[1]) if card.get("_path") else ""
             if body:
                 lines.append("  設定：" + _clip(body, 200))
     if not project.characters:
@@ -60,6 +59,24 @@ def bible_block(project, with_body=True, with_look=True):
     if not project.locations:
         lines.append("（沒有地點卡）")
     return "\n".join(lines)
+
+
+def card_summary(body):
+    """卡片本文的第一段（M1 修正 L-5）：略過開頭的標題與清單，取到第一個空行或標題為止。
+    S6 草稿後面的「## 待確認」「## 原文依據」是給人看的，不進提示詞。"""
+    para = []
+    for line in (body or "").split("\n"):
+        text = line.strip()
+        if text.startswith("#") or (not text and para):
+            if para:
+                break
+            continue
+        if not text or text.startswith(("-", "*", ">")):
+            if para:
+                break
+            continue
+        para.append(text)
+    return " ".join(para)
 
 
 def _position(box):
@@ -159,7 +176,8 @@ EXAMPLE_SCRIPT = """## 第 3 頁（模板 2h：上下兩格）
 **1 格**｜中景、平視｜屋簷下大雨，阿杰把折好的傘遞給站在屋簷下的小晴，自己半邊肩膀已經淋濕。
 - 阿杰：拿去，我跑一下就到了。
 
-**2 格**｜特寫｜小晴低頭看著手裡的傘，握緊傘柄。
+**2 格**｜特寫｜小晴低頭看著手裡的傘，握緊傘柄；阿杰已經跑出畫面。
+- 阿杰（畫面外、喊）：明天見！
 - 小晴（心聲）：……這個笨蛋。
 - 狀聲詞：嘩啦嘩啦"""
 
@@ -179,6 +197,7 @@ SCRIPT_RULES = """# 任務：漫畫劇本（一次寫一頁）
 - 鏡頭詞從這些選一個：%(shots)s。角度詞可省略（預設平視），可用：%(angles)s。例：`遠景、俯視`。
 - 沒有台詞的格寫 `- （無台詞）`。
 - 台詞的語氣只能是這些括號標記：%(marks)s；一般說話不加括號。
+- **說話的人不在這一格的畫面裡**時要標出來：透過通訊器、電話、廣播傳來的聲音標 %(radio)s（不能再加語氣）；人在附近、只是這一格沒畫到他，標（畫面外），要加語氣就寫成（畫面外、喊）。例：`- 阿杰（通訊）：收到。`
 - 角色名用聖經的姓名（或別名）。**每一格最多 %(max)d 個對話框**（旁白也算；狀聲詞不算）。
 
 ## 寫作原則
@@ -186,11 +205,12 @@ SCRIPT_RULES = """# 任務：漫畫劇本（一次寫一頁）
 2. **台詞要短**：一個對話框最好 20 字內；長句拆開、或拆到下一格。
 3. **旁白只用在**：時間地點、轉場、原著裡真的需要文字交代的資訊；不要重複畫面已經看得到的事。
 4. **畫面描述只寫看得見的**：場景、人物動作、表情、重要物件、光線。不要寫角色的外觀（髮型、衣服、長相——那由視覺聖經負責）。每格一個瞬間。
-5. **格內角色的左右關係寫清楚**（例如「阿杰在左、小晴在右」），分鏡會依這個擺位置。
+5. **格內角色的左右關係寫清楚**（例如「阿杰在左、小晴在右」），分鏡會依這個擺位置。隔著通訊對話時，每一格只畫其中一邊的人，另一邊的台詞標（通訊）；不要把不在同一個地方的人畫進同一格。
 6. 照規劃的 beat 演，不要多演、少演；同一頁的鏡頭要有變化（遠近交替），重要的情緒用近景或特寫。
 7. 格子的位置與形狀（橫長、直長…）已列在本頁任務裡，鏡頭與構圖要配合：橫長格適合遠景、並排的人；直長格適合單人、仰視或俯視。""" % {
     "shots": "、".join(SHOT_WORDS), "angles": "、".join(ANGLE_WORDS),
-    "marks": "、".join("（%s）" % m for m in MARKS), "max": MAX_BUBBLES}
+    "marks": "、".join("（%s）" % m for m in MARKS), "max": MAX_BUBBLES,
+    "radio": "／".join("（%s）" % m for m in RADIO_MARKS)}
 
 
 def _plan_page_text(plan_page, shapes):
@@ -234,7 +254,8 @@ EXAMPLE_STORYBOARD = {"panels": [
      "characters": [{"id": "qing", "pose": "Looking down at an umbrella held in both hands", "expression": "Touched, trying to hide a smile", "box": [0.15, 0.2, 0.75, 1.0]}],
      "objects": [{"caption": "A folded umbrella gripped in both hands", "box": [0.2, 0.65, 0.7, 1.0]}],
      "sfx": [{"text": "嘩啦嘩啦", "box": [0.02, 0.02, 0.3, 0.45]}],
-     "bubbles": [{"kind": "thought", "speaker": "qing", "text": "……這個笨蛋。", "anchor": [0.84, 0.15]}]}]}
+     "bubbles": [{"kind": "shout", "speaker": "jie", "offscreen": True, "text": "明天見！", "anchor": [0.86, 0.12]},
+                 {"kind": "thought", "speaker": "qing", "text": "……這個笨蛋。", "anchor": [0.86, 0.55]}]}]}
 
 def example_json():
     """範例分鏡：一格一行，比 indent 排版省 token。"""
@@ -259,17 +280,17 @@ STORYBOARD_RULES = """# 任務：分鏡 JSON（一次一頁）
   "characters": [ {"id": "角色id", "outfit": "服裝id（可省略＝default）", "pose": "英文姿勢", "expression": "英文表情", "box": [x0, y0, x1, y1]} ],
   "objects": [ {"caption": "英文：重要物件", "box": [x0, y0, x1, y1]} ],
   "sfx": [ {"text": "狀聲詞原文", "box": [x0, y0, x1, y1]} ],
-  "bubbles": [ {"kind": "%(kinds)s", "speaker": "角色id（旁白省略）", "text": "台詞", "anchor": [x, y]} ]
+  "bubbles": [ {"kind": "%(kinds)s", "speaker": "角色id（旁白省略）", "text": "台詞", "anchor": [x, y], "offscreen": true（只有說話的人不在畫面上時才寫）} ]
 }
 
 ## 規則
 1. **英文欄位**：scene、pose、expression、objects.caption 一律英文；台詞與狀聲詞保持原文（繁體中文）。
 2. **不寫角色外觀**：髮型、衣服、眼鏡、年齡、長相由程式從視覺聖經貼上。scene 裡人物用代稱（the young woman、the young man、the girl、the boy…），pose／expression 只寫動作與情緒。
 3. **一格一張圖**：scene 只描述這一格；characters 只列這一格畫面裡真的看得到的角色，每個角色只出現一次，不要在 scene 裡提到沒列在 characters 的人。沒有人的空鏡 characters 給 []。
-4. **說話的人必須在 characters 裡**。如果他在畫面外說話，把他列進 characters，框放在畫面邊緣（例如 [0.85, 0.2, 1.0, 1.0]），pose 寫成 partly visible at the edge of the frame。
+4. **說話的人在畫面上，就必須列在 characters 裡。不在畫面上的人不要列進 characters**（列了就會被畫出來）：劇本標（通訊）（電話）等的台詞用 kind "radio" 並加 "offscreen": true；標（畫面外）的台詞照語氣選 speech／shout／whisper 並加 "offscreen": true。offscreen 的 speaker 仍然寫角色 id。心聲（thought）不能 offscreen。
 5. **座標一律是 0–1 的比例** [x0, y0, x1, y1]（左上 0,0、右下 1,1）、相對於這一格的圖；x0<x1、y0<y1。不准寫像素。
 6. **角色框**：單人全身／中景大約 [0.25, 0.1, 0.75, 1.0]；近景、特寫的框要大，框頂靠近上緣；遠景的人要小。**兩人以上必須左右分開**（左邊的人框中心 x<0.4、右邊的 x>0.6），框不要互相重疊。劇本寫了誰在左、誰在右就照辦。若 angle 用 over_shoulder，背對鏡頭的角色框放在左邊。
-7. **對話框 bubbles** 依閱讀順序（日漫：先右後左、先上後下）排列。text 逐字照劇本（見規則 8）；kind 由劇本決定：（心聲）→ thought、（喊）→ shout、（小聲）→ whisper、旁白 → narration（不寫 speaker）；沒標語氣的一般台詞用 speech，但明顯是大喊或耳語時可以改用 shout／whisper。
+7. **對話框 bubbles** 依閱讀順序（日漫：先右後左、先上後下）排列。text 逐字照劇本（見規則 8）；kind 由劇本決定：（心聲）→ thought、（喊）→ shout、（小聲）→ whisper、（通訊）（電話）（廣播）（無線電）→ radio、旁白 → narration（不寫 speaker）；沒標語氣的一般台詞用 speech，但明顯是大喊或耳語時可以改用 shout／whisper。
 8. **台詞逐字照劇本，不增不減不改**，唯一能做的是加換行 "\\n"。直排嵌字沒有中文斷詞，所以**每一行請控制在 8–10 個字內**，在詞與詞之間（或句讀後）斷開，例如 "對不起！\\n排隊排到一半\\n被教授抓去搬東西！"；短句不用換行。
 9. **anchor 是對話框中心的希望位置**：放在畫面裡沒有重要東西的空白處（常見是上緣兩個角落），**不要放在角色的臉上**（臉大約在角色框的上 1/4）。先讀的對話框放右上，後讀的往左、往下排；多個對話框的位置要錯開。
 10. **狀聲詞 sfx** 逐字照劇本；box 放在動作發生的地方旁邊，不要壓住角色的臉。沒有就省略。

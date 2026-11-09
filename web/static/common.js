@@ -102,7 +102,7 @@
     label: { plan: "規劃", script: "劇本", storyboard: "分鏡", render: "出圖", pages: "頁面" },
     shot: { extreme_wide: "大遠景", wide: "遠景", full: "全身", medium: "中景", close: "近景", extreme_close: "特寫" },
     angle: { eye: "平視", high: "俯視", low: "仰視", bird: "鳥瞰", dutch: "斜角", over_shoulder: "過肩" },
-    kind: { speech: "對話", thought: "心聲", shout: "喊叫", whisper: "悄悄話", narration: "旁白" },
+    kind: { speech: "對話", thought: "心聲", shout: "喊叫", whisper: "悄悄話", radio: "通訊（電子音）", narration: "旁白" },
   });
 
   /** 整章批次的對話框。 */

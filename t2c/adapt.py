@@ -119,7 +119,7 @@ class Adapter:
             raise AdaptError("原著是空的：%s" % self.project.source_path(chapter))
 
         def validate(data):
-            issues = check.check_plan(self.project, data, self.pages_data, want_pages)
+            issues = check.check_plan(self.project, data, self.pages_data, want_pages, source=source)
             return data, issues
 
         messages = prompts.plan_messages(self.project, source, self.pages_data, want_pages, title_hint)
@@ -219,7 +219,7 @@ class Adapter:
             except Exception:
                 raise AdaptError("第 %d 頁的劇本標題沒有寫模板，也找不到改編規劃可以對照。標題請寫成「## 第 %d 頁（模板 5a）」" % (page.page, page.page))
         if key not in self.pages_data["templates"]:
-            raise AdaptError("第 %d 頁：沒有這個格子模板「%s」（見 layouts/pages.json）" % (page.page, key))
+            raise AdaptError("第 %d 頁：沒有這個格子模板「%s」（見 t2c/data/pages.json）" % (page.page, key))
         return key
 
     @staticmethod
@@ -299,7 +299,10 @@ class Adapter:
         if not isinstance(item, dict):
             return item
         keep = {"characters": check.CHAR_KEYS, "bubbles": check.BUBBLE_KEYS, "objects": {"caption", "box"}, "sfx": {"text", "box"}}[kind]
-        return {k: v for k, v in item.items() if k in keep}
+        out = {k: v for k, v in item.items() if k in keep}
+        if kind == "bubbles" and out.get("offscreen") is False:
+            del out["offscreen"]                                   # 預設值不寫，檔案比較好讀
+        return out
 
     @staticmethod
     def _order(panel):

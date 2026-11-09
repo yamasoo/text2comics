@@ -71,7 +71,7 @@ def render_jobs(project, chapter, jobs, cfg, preset_name=None, force=False, shou
     chosen, preset, default = resolve_preset(cfg, preset_name)
     comfy_cfg = cfg.get("comfy") or {}
     base = comfy_cfg.get("url") or "http://127.0.0.1:8188"
-    workflow = comfy.load_workflow(comfy.ROOT / comfy_cfg.get("workflow", "workflows/moss_layout.api.json"))
+    workflow = comfy.config_workflow(cfg)
     folder = project.out_dir("renders", compose.chapter_name(chapter))
     build = project.out_dir("build", compose.chapter_name(chapter))
     todo = [(job, seed) for job in jobs for seed in (job["run_seeds"] if "run_seeds" in job else job["seeds"])]

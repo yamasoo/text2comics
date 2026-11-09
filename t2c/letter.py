@@ -20,8 +20,8 @@ from PIL import Image, ImageDraw, ImageFont
 from . import compose, layout
 
 LETTERS_VERSION = 1
-KINDS = ("speech", "thought", "shout", "whisper", "narration")
-ROLE_OF_KIND = {"speech": "dialogue", "thought": "dialogue", "whisper": "dialogue", "shout": "shout",
+KINDS = ("speech", "thought", "shout", "whisper", "radio", "narration")
+ROLE_OF_KIND = {"speech": "dialogue", "thought": "dialogue", "whisper": "dialogue", "radio": "dialogue", "shout": "shout",
                 "narration": "narration"}
 SCALE_MIN, SCALE_MAX = 0.5, 2.0
 ROWS_MIN, ROWS_MAX = 1, 40
@@ -462,7 +462,7 @@ def shape_axes(kind, tw, th, cell):
     """字塊 → 對話框的半徑 (rx, ry)（narration 是方框的半寬、半高）。保證字塊四角在框內。"""
     if kind == "narration":
         return tw / 2 + 0.55 * cell, th / 2 + 0.55 * cell
-    pad = {"thought": 0.95, "shout": 0.75}.get(kind, 0.6) * cell
+    pad = {"thought": 0.95, "shout": 0.75, "radio": 0.7}.get(kind, 0.6) * cell
     rx, ry = tw / 2 * 1.2 + pad, th / 2 * 1.12 + pad
     corner = (tw / 2 / rx) ** 2 + (th / 2 / ry) ** 2
     if corner > 0.92:                                   # 角落超出橢圓就等比放大
@@ -473,7 +473,7 @@ def shape_axes(kind, tw, th, cell):
 
 def outer_axes(kind, rx, ry):
     """含外框突出（爆炸的尖角、雲的圓弧）後的範圍半徑，用來找位置。"""
-    grow = {"shout": 1.16, "thought": 1.08}.get(kind, 1.0)
+    grow = {"shout": 1.16, "thought": 1.08, "radio": 1.06}.get(kind, 1.0)
     return rx * grow, ry * grow
 
 
@@ -624,7 +624,29 @@ def auto_tail(bubble, face, body, cell):
     return [cx + dx * (edge + length), cy + dy * (edge + length)]
 
 
+def offscreen_tail(bubble, inner, cell):
+    """畫面外的說話者（M1 修正）：尾巴指向離對話框最近的格框邊（左右優先），尖端伸出框外，
+    畫的時候被格框切掉，看起來像聲音從畫面外來。inner：扣掉框線的格子內框。"""
+    cx, cy, ox, oy = bubble["cx"], bubble["cy"], bubble["ox"], bubble["oy"]
+    gaps = {"left": (cx - ox) - inner[0], "right": inner[2] - (cx + ox),
+            "top": 1.6 * ((cy - oy) - inner[1]), "bottom": 1.6 * (inner[3] - (cy + oy))}
+    side = min(gaps, key=gaps.get)
+    out = 1.5 * cell
+    if side == "left":
+        return [inner[0] - out, cy + 0.3 * oy]
+    if side == "right":
+        return [inner[2] + out, cy + 0.3 * oy]
+    if side == "top":
+        return [cx + 0.25 * ox, inner[1] - out]
+    return [cx + 0.25 * ox, inner[3] + out]
+
+
 # ---- 排版計畫 ---------------------------------------------------------------------------------
+
+def _quote(text, limit=8):
+    t = str(text or "").replace("\n", "⏎")
+    return t if len(t) <= limit else t[:limit] + "…"
+
 
 def _px(point, rect):
     return [rect[0] + point[0] * (rect[2] - rect[0]), rect[1] + point[1] * (rect[3] - rect[1])]
@@ -633,6 +655,28 @@ def _px(point, rect):
 def _box_px(box, rect):
     w, h = rect[2] - rect[0], rect[3] - rect[1]
     return [rect[0] + box[0] * w, rect[1] + box[1] * h, rect[0] + box[2] * w, rect[1] + box[3] * h]
+
+
+ORDER_COST = 2.0          # 右翻會先讀到後一個對話框：比移動 2 個對角線還貴，除非要壓到臉
+
+
+def order_conflict(first, later, w, h):
+    """右翻（日漫）閱讀：later（後一個對話框）會不會比 first 先被讀到。first、later 是外框 [x0, y0, x1, y1]，
+    w、h 是格子大小。只抓明確的情況（M1 修正 M-2）：
+    1. later 整個在 first 上面；
+    2. later 起頭比較高、又在右邊（中心右移超過 5%）——「跑到右上方」；
+    3. 兩個起頭差不多高（8% 內），later 整個在 first 右邊。
+    later 在右下方、起頭明顯比較低的，讀者多半先往左讀，不算。"""
+    ty, tx = 0.05 * h, 0.05 * w
+    if later[3] <= first[1]:
+        return True
+    if later[1] < first[1] - ty and (later[0] + later[2]) / 2 > (first[0] + first[2]) / 2 + tx:
+        return True
+    return abs(later[1] - first[1]) <= 1.6 * ty and later[0] >= first[2] - tx
+
+
+def _outer_box(item):
+    return [item["cx"] - item["ox"], item["cy"] - item["oy"], item["cx"] + item["ox"], item["cy"] + item["oy"]]
 
 
 def _place(kind, rx, ry, anchor, rect, margin, faces, bodies, placed, cell, objects=()):
@@ -660,12 +704,12 @@ def _place(kind, rx, ry, anchor, rect, margin, faces, bodies, placed, cell, obje
             cost = math.hypot(cx - anchor[0], cy - anchor[1]) / diag
             face_hit = sum(shape_overlap(shape, f) / max(_area(f), 1.0) for f in face_boxes)
             cost += (5 + 30 * face_hit) if face_hit > 0 else 0
+            mine = [cx - ox, cy - oy, cx + ox, cy + oy]
             for other in placed:
-                gap = _inflate([other["cx"] - other["ox"], other["cy"] - other["oy"],
-                                other["cx"] + other["ox"], other["cy"] + other["oy"]], 0.4 * cell)
+                gap = _inflate(_outer_box(other), 0.4 * cell)
                 cost += 30 * shape_overlap(shape, gap) / area
-                if cx > other["cx"] + 0.05 * w and cy < other["cy"] - 0.05 * h:
-                    cost += 0.6                          # 後一個跑到前一個的右上方：右翻時會先讀到
+                if order_conflict(_outer_box(other), mine, w, h):
+                    cost += ORDER_COST                   # 右翻時會先讀到這一個（順序顛倒）
             cost += 0.4 * sum(shape_overlap(shape, b) for b in bodies) / area
             cost += 3 * sum(shape_overlap(shape, o) / max(_area(o), 1.0) for o in objects)
             if best is None or cost < best[0]:
@@ -676,8 +720,8 @@ def _place(kind, rx, ry, anchor, rect, margin, faces, bodies, placed, cell, obje
 def plan_page(project, chapter, page, pages_data, picks, letters, settings):
     """算出一頁所有對話框與狀聲詞的位置。回傳可以轉 JSON 的 dict（座標都是整頁像素）：
     {"page", "size", "dpi", "warnings", "panels": [{"id", "slot", "rect", "window", "faces", "faces_auto",
-      "bubbles": [{"index", "kind", "text", "speaker", "center", "rx", "ry", "tail", "anchor", "cell", "lines",
-                   "auto_center", "auto_tail", "scale", "rows"}],
+      "bubbles": [{"index", "kind", "text", "speaker", "offscreen", "center", "rx", "ry", "tail", "anchor", "cell",
+                   "lines", "auto_center", "auto_tail", "scale", "rows", "clip"}],
       "sfx": [{"index", "text", "box", "angle", "vertical"}]}]}"""
     cfg = pages_data["page"]
     dpi = compose.page_dpi(cfg)
@@ -710,6 +754,7 @@ def plan_page(project, chapter, page, pages_data, picks, letters, settings):
             mapped = map_box(layout.check_box(obj.get("box", [0, 0, 1, 1])), window)
             if mapped and _area(mapped) < 0.5:                 # 蓋住大半格的物件（特寫）不算
                 objects.append(_box_px(mapped, rect))
+        inner = [rect[0] + frame, rect[1] + frame, rect[2] - frame, rect[3] - frame]     # 框線以內：尾巴伸出去會被框切掉
         out = {"id": info["id"], "slot": info["slot"], "rect": list(rect), "window": window,
                "faces": [[round(v, 1) for v in f] for f in faces], "faces_auto": tweak["faces"] is None,
                "bubbles": [], "sfx": []}
@@ -725,8 +770,9 @@ def plan_page(project, chapter, page, pages_data, picks, letters, settings):
             text = str(bubble.get("text") or "")
             over = tweak["bubbles"][index] if index < len(tweak["bubbles"]) else {}
             if "text" in over and over["text"] != text:
-                warn("%s 第 %d 個對話框：台詞改過了（微調時是「%s」），微調可能不適用" % (where, index + 1, over["text"]))
+                warn("%s 第 %d 個對話框：台詞改過了（微調時是「%s」），微調可能不適用" % (where, index + 1, _quote(over["text"], 20)))
             speaker = bubble.get("speaker") if kind != "narration" else None
+            offscreen = bool(bubble.get("offscreen")) and kind != "narration"
             default_anchor = [0.88, 0.1] if kind == "narration" else [0.5, 0.15]
             anchor = _px(map_point(bubble.get("anchor", default_anchor), window), rect)
             role = ROLE_OF_KIND[kind]
@@ -753,27 +799,40 @@ def plan_page(project, chapter, page, pages_data, picks, letters, settings):
             else:
                 cx, cy, face_hit = _place(kind, rx, ry, anchor, rect, margin, faces, bodies, placed, cell, objects)
             if face_hit > 0.02:
-                warn("%s 第 %d 個對話框（%s）：壓到臉了，請在介面調整" % (where, index + 1, text[:8]))
+                warn("%s 第 %d 個對話框（%s）：壓到臉了，請在介面調整" % (where, index + 1, _quote(text)))
             item = {"kind": kind, "cx": cx, "cy": cy, "rx": rx, "ry": ry, "ox": ox, "oy": oy}
             placed.append(item)
             if kind == "narration":
                 tail, auto_tail_flag = None, True
             elif "tail" in over:
                 tail, auto_tail_flag = over["tail"] and _px(over["tail"], rect), False
+            elif offscreen:
+                tail, auto_tail_flag = (None if kind == "radio" else offscreen_tail(item, inner, cell)), True
             elif speaker:
                 if speaker not in chars:
-                    raise LetterError("%s 第 %d 個對話框：說話的角色「%s」不在這一格" % (where, index + 1, speaker))
+                    raise LetterError("%s 第 %d 個對話框：說話的角色「%s」不在這一格（人在畫面外就加 \"offscreen\": true）"
+                                      % (where, index + 1, speaker))
                 tail, auto_tail_flag = auto_tail(item, face_of.get(speaker), chars.get(speaker), cell), True
             else:
                 tail, auto_tail_flag = None, True
             out["bubbles"].append({
-                "index": index, "kind": kind, "text": text, "speaker": speaker,
+                "index": index, "kind": kind, "text": text, "speaker": speaker, "offscreen": offscreen,
                 "center": [round(cx, 1), round(cy, 1)], "rx": round(rx, 1), "ry": round(ry, 1),
                 "tail": [round(v, 1) for v in tail] if tail else None, "anchor": [round(v, 1) for v in anchor],
                 "cell": round(cell, 2), "lines": lines, "vertical": settings.vertical,
                 "auto_center": "center" not in over, "auto_tail": auto_tail_flag,
                 "scale": scale, "rows": over.get("rows"), "role": role,
+                "clip": [round(v, 1) for v in inner], "order_issue": None,
             })
+
+        w, h = rect[2] - rect[0], rect[3] - rect[1]
+        for j, later in enumerate(placed):
+            for i in range(j):
+                if order_conflict(_outer_box(placed[i]), _outer_box(later), w, h):
+                    out["bubbles"][j]["order_issue"] = i + 1
+                    warn("%s 第 %d 個對話框（%s）會比第 %d 個（%s）先讀到：右翻是右邊、上面的先讀。請改分鏡的 anchor 或對話框順序，或在嵌字頁拖曳"
+                         % (where, j + 1, _quote(out["bubbles"][j]["text"]), i + 1, _quote(out["bubbles"][i]["text"])))
+                    break
 
         if sfx_overlay:
             for index, sfx in enumerate(panel.get("sfx") or []):
@@ -841,6 +900,19 @@ def burst_points(cx, cy, rx, ry, seed, tip=None):
                       key=lambda k: abs(math.atan2(math.sin(math.atan2(points[k][1] - cy, points[k][0] - cx) - aim),
                                                    math.cos(math.atan2(points[k][1] - cy, points[k][0] - cx) - aim))))
         points[nearest] = tuple(tip)
+    return points
+
+
+def radio_points(cx, cy, rx, ry, cell):
+    """電子音框：沿橢圓的規則鋸齒，齒距約半個字。"""
+    perim = math.pi * (3 * (rx + ry) - math.sqrt((3 * rx + ry) * (rx + 3 * ry)))
+    count = max(16, int(perim / (0.55 * cell)))
+    count += count % 2
+    points = []
+    for i in range(count):
+        a = 2 * math.pi * i / count
+        r = 1.06 if i % 2 == 0 else 0.98
+        points.append((cx + math.cos(a) * rx * r, cy + math.sin(a) * ry * r))
     return points
 
 
@@ -947,7 +1019,7 @@ def _bubble_bounds(b, cell):
 def render_bubble(canvas, rect, b, settings, seed):
     """畫一個對話框（形狀＋尾巴＋字）。先在放大 SS 倍的小圖上畫，再縮回來貼到 canvas（限制在格子內）。"""
     cell = b["cell"]
-    bounds = _inter(_bubble_bounds(b, cell), list(rect))
+    bounds = _inter(_bubble_bounds(b, cell), list(b.get("clip") or rect))
     x0, y0 = int(math.floor(bounds[0])), int(math.floor(bounds[1]))
     x1, y1 = int(math.ceil(bounds[2])), int(math.ceil(bounds[3]))
     if x1 <= x0 or y1 <= y0:
@@ -1001,6 +1073,23 @@ def render_bubble(canvas, rect, b, settings, seed):
             di.ellipse((x - bump + w, y - bump + w, x + bump - w, y + bump - w), fill=255)
         dm.ellipse((cx - rx * 0.93, cy - ry * 0.93, cx + rx * 0.93, cy + ry * 0.93), fill=255)
         di.ellipse((cx - rx * 0.93, cy - ry * 0.93, cx + rx * 0.93, cy + ry * 0.93), fill=255)
+    elif kind == "radio":                                     # 電子音：細密、規則的鋸齒（和喊叫的不規則爆炸不同）
+        points = radio_points(cx, cy, rx, ry, c)
+        tail = tail_shape("speech", cx, cy, rx, ry, tip, c) if tip else None
+        dm.polygon(points, fill=255)
+        dm.line(points + [points[0]], fill=255, width=w, joint="curve")
+        di.polygon(points, fill=255)
+        di.line(points + [points[0]], fill=0, width=w, joint="curve")
+        if tail:
+            edges, poly = tail
+            dm.polygon(poly, fill=255)
+            for e in edges:
+                dm.line(e, fill=255, width=w, joint="curve")
+            di.polygon(poly, fill=255)
+            for e in edges:
+                di.line(e, fill=0, width=w, joint="curve")
+            shrink = 1 - w / max(min(rx, ry), 1.0)
+            di.polygon([(cx + (x - cx) * shrink, cy + (y - cy) * shrink) for x, y in points], fill=255)
     else:                                                     # speech、whisper
         tail = tail_shape(kind, cx, cy, rx, ry, tip, c) if tip else None
         dm.ellipse(ell, fill=255)

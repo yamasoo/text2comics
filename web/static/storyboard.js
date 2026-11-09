@@ -111,7 +111,7 @@
                 h("td", {}, panel.location ? locName(panel.location) : h("span", { class: "muted" }, "－")),
                 h("td", {}, h("div", { class: "sb-scene" }, panel.scene || h("span", { class: "t2c-err" }, "（缺畫面）"))),
                 h("td", {}, (panel.characters || []).map((c) => charName(c.id)).join("、")),
-                h("td", { class: "sb-lines" }, (panel.bubbles || []).map((b) => h("div", {}, h("span", { class: "muted" }, `${T2C.kind[b.kind || "speech"]}${b.speaker ? "・" + charName(b.speaker) : ""}：`), String(b.text || "").replace(/\n/g, "／"))))))))));
+                h("td", { class: "sb-lines" }, (panel.bubbles || []).map((b) => h("div", {}, h("span", { class: "muted" }, `${T2C.kind[b.kind || "speech"]}${b.speaker ? "・" + charName(b.speaker) : ""}${b.offscreen ? "（畫面外）" : ""}：`), String(b.text || "").replace(/\n/g, "／"))))))))));
       }), h("div", { class: "row" }, h("button", { class: "btn btn-sm", type: "button", onclick: addPage }, "＋ 新增一頁")));
     }
 
@@ -211,9 +211,26 @@
           changed({ editor: true });
         }),
         list("對話框（依閱讀順序）", "bubbles", (b) => h("div", { class: "sb-grid" },
-          field("種類", select(b.kind || "speech", Object.entries(T2C.kind), (v) => { b.kind = v; if (v === "narration") delete b.speaker; changed({ editor: true }); })),
+          field("種類", select(b.kind || "speech", Object.entries(T2C.kind), (v) => {
+            b.kind = v;
+            if (v === "narration") { delete b.speaker; delete b.offscreen; }
+            if (v === "thought") delete b.offscreen;
+            changed({ editor: true });
+          })),
           (b.kind || "speech") !== "narration"
-            ? field("說話的人", select(b.speaker || "", present.map((id) => [id, charName(id)]), (v) => { b.speaker = v; changed(); }, "（選一個在場的角色）")) : h("span"),
+            ? h("div", { class: "stack t2c-tight" },
+                field("說話的人", select(b.speaker || "",
+                  (b.offscreen ? vocab.characters.filter((x) => !present.includes(x.id)).map((x) => x.id) : present).map((id) => [id, charName(id)]),
+                  (v) => { b.speaker = v; changed(); }, b.offscreen ? "（選一個不在這一格的角色）" : "（選一個在場的角色）")),
+                (b.kind || "speech") === "thought" ? null
+                  : h("label", { class: "row t2c-tight t2c-small" },
+                    h("input", { type: "checkbox", checked: !!b.offscreen, onchange: (e) => {
+                      if (e.target.checked) { b.offscreen = true; if (present.includes(b.speaker)) delete b.speaker; }
+                      else { delete b.offscreen; if (b.speaker && !present.includes(b.speaker)) delete b.speaker; }
+                      changed({ editor: true });
+                    } }),
+                    "畫面外（人不在這一格，或透過通訊說話）"))
+            : h("span"),
           h("div", { class: "sb-span" }, field("台詞", text(b.text, (v) => { b.text = v; }, { multi: true, rows: 2 }), "要換行就直接按 Enter（每行 12 字內；旁白 16 字）")),
           h("div", { class: "muted t2c-small sb-box" }, `位置 ${(b.anchor || [0.5, 0.2]).join(", ")}`)),
         () => {

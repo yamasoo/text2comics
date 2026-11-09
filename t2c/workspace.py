@@ -12,8 +12,6 @@ from . import bible, check, compose, layout, letter, script as sc
 from .compile import CompileError, _seed, compile_chapter
 from .project import FRONT, Project, ProjectError
 
-ROOT = Path(__file__).resolve().parent.parent
-SAMPLE = ROOT / "examples" / "sample_comic"
 CH_RE = re.compile(r"^ch(\d{3})\.(?:json|md|txt)$")
 MAX_CHAPTER = 999
 
@@ -72,9 +70,16 @@ def _yaml_text(text):
     return json.dumps(str(text), ensure_ascii=False)       # JSON 字串同時是合法的 YAML
 
 
-def create_project(path, title="", style="", from_sample=False, sample_renders=False):
-    """建立漫畫專案資料夾。資料夾要不存在或是空的。from_sample：複製範例（屋頂的便當）；
-    sample_renders：連同範例的出圖、選圖、嵌字微調（沒有 GPU 也能把一章走完）。回傳 Project。"""
+def sample_has_renders(sample):
+    """範例專案有沒有出圖（renders/ 不進版控，新 clone 的範例沒有；M1 修正 L-7）。"""
+    folder = Path(sample) / "renders" / "ch001" if sample else None
+    return bool(folder and folder.is_dir() and any(folder.glob("*.png")))
+
+
+def create_project(path, title="", style="", sample=None, sample_renders=False):
+    """建立漫畫專案資料夾。資料夾要不存在或是空的。sample：要複製的範例專案資料夾（由呼叫端給，
+    獨立工具是 examples/sample_comic；None＝建空專案）；sample_renders：連同範例的出圖、選圖、嵌字微調
+    （沒有 GPU 也能把一章走完）。回傳 Project。"""
     root = Path(str(path or "").strip()).expanduser()
     if not str(path or "").strip():
         raise WorkspaceError("請輸入新專案的資料夾路徑")
@@ -82,10 +87,16 @@ def create_project(path, title="", style="", from_sample=False, sample_renders=F
         raise WorkspaceError("請輸入完整路徑（例如 E:\\comics\\作品名），目前是「%s」" % path)
     if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise WorkspaceError("%s 已經存在而且不是空的資料夾；請換一個新資料夾" % root)
-    if from_sample:
+    if sample:
+        sample = Path(sample)
+        if not (sample / "project.yaml").is_file():
+            raise WorkspaceError("範例專案 %s 不完整（沒有 project.yaml）" % sample)
+        if sample_renders and not sample_has_renders(sample):
+            raise WorkspaceError("範例沒有出圖（renders/ 不進版控，新下載的工具沒有）：請不要勾「連同範例的出圖」，"
+                                 "或先用 tools/panels.py 幫範例出圖")
         root.mkdir(parents=True, exist_ok=True)
         for part in SAMPLE_BASE + (SAMPLE_RENDERS if sample_renders else ()):
-            src = SAMPLE / part
+            src = sample / part
             if src.is_dir():
                 shutil.copytree(src, root / part)
             elif src.is_file():
@@ -249,7 +260,15 @@ def read_plan(project, n):
     if not isinstance(data, dict):
         return {"path": str(path), "plan": None, "raw": path.read_text(encoding="utf-8"),
                 "issues": [{"level": "error", "where": "", "message": "plan/ch%03d.json 不是合法的 JSON" % n}]}
-    return {"path": str(path), "plan": data, "issues": issue_dicts(check.check_plan(project, data, layout.load_pages()))}
+    return {"path": str(path), "plan": data,
+            "issues": issue_dicts(check.check_plan(project, data, layout.load_pages(), source=_source_or_none(project, n)))}
+
+
+def _source_or_none(project, n):
+    try:
+        return project.load_source(n) or None
+    except (OSError, ProjectError):
+        return None
 
 
 def save_plan(project, n, plan):
@@ -260,7 +279,7 @@ def save_plan(project, n, plan):
             plan = json.loads(plan)
         except ValueError as error:
             raise WorkspaceError("規劃不是合法的 JSON：%s" % error)
-    issues = check.check_plan(project, plan, layout.load_pages())
+    issues = check.check_plan(project, plan, layout.load_pages(), source=_source_or_none(project, n))
     errs = sc.errors(issues)
     if errs:
         raise WorkspaceError("規劃有 %d 個問題，沒有存檔：\n%s" % (len(errs), "\n".join("  - %s" % e for e in errs)))
@@ -346,9 +365,26 @@ def normalize_storyboard(doc, n):
                 clean.pop("location", None)
             panels.append({k: clean[k] for k in PANEL_ORDER if k in clean} | {k: v for k, v in clean.items() if k not in PANEL_ORDER})
         pages.append({"page": page.get("page"), "template": page.get("template"), "panels": panels})
+    _no_duplicates(pages)
     out = {"version": 1, "chapter": int(n), "title": str(doc.get("title") or "")}
     out["pages"] = pages
     return out
+
+
+def _no_duplicates(pages):
+    """M1 修正 L-2：重複的頁碼或格 id 會讓兩格共用同一個檔名與 seed（同一張圖），編譯卻不會發現。"""
+    seen_pages, seen_ids = {}, {}
+    for page in pages:
+        no = page.get("page")
+        if no in seen_pages:
+            raise WorkspaceError("第 %s 頁出現兩次，沒有存檔；頁碼不能重複" % no)
+        seen_pages[no] = True
+        for panel in page["panels"]:
+            pid = panel.get("id")
+            if pid in seen_ids:
+                raise WorkspaceError("格 id「%s」重複（第 %s 頁第 %s 格和第 %s 頁），沒有存檔；重複的格會共用同一張圖。把其中一個的 id 刪掉讓程式重編"
+                                     % (pid, no, panel.get("slot"), seen_ids[pid]))
+            seen_ids[pid] = no
 
 
 def storyboard_issues(project, n, board, pages_data=None):

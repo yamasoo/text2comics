@@ -29,7 +29,8 @@ ANGLE = {
     "dutch": "tilted dutch angle",
     "over_shoulder": "over-the-shoulder view",
 }
-BUBBLE_KINDS = {"speech", "thought", "shout", "whisper", "narration"}
+BUBBLE_KINDS = {"speech", "thought", "shout", "whisper", "radio", "narration"}
+OFFSCREEN_KINDS = {"speech", "shout", "whisper", "radio"}   # 可以 offscreen 的種類（M1 修正）
 SFX_MODES = {"overlay", "moss"}
 NUMBERS = {1: "one person", 2: "two people", 3: "three people", 4: "four people", 5: "five people"}
 
@@ -105,6 +106,28 @@ def character_caption(card, entry, side=None):
     return " ".join(p for p in parts if p)
 
 
+def bubble_error(project, bubble, cast):
+    """對話框與這一格角色的一致性（不合就丟 KeyError）。cast：這一格 characters 的 id。
+    說話者必須在這一格；`offscreen: true` 時反過來，必須是聖經角色、而且**不在**這一格（資料格式第 5 節）。"""
+    kind = bubble.get("kind", "speech")
+    if kind not in BUBBLE_KINDS:
+        raise KeyError("對話框種類「%s」不認得（可用：%s）" % (kind, "、".join(sorted(BUBBLE_KINDS))))
+    speaker, offscreen = bubble.get("speaker"), bubble.get("offscreen", False)
+    if not isinstance(offscreen, bool):
+        raise KeyError("offscreen 只能是 true 或 false")
+    if offscreen:
+        if kind not in OFFSCREEN_KINDS:
+            raise KeyError("%s 的對話框不能 offscreen（可以的種類：%s）" % (kind, "、".join(sorted(OFFSCREEN_KINDS))))
+        if not speaker:
+            raise KeyError("offscreen 的對話框也要寫 speaker")
+        if speaker not in project.characters:
+            raise KeyError("說話的角色「%s」不在 bible/characters" % speaker)
+        if speaker in cast:
+            raise KeyError("「%s」標了 offscreen，但他列在這一格的 characters（會被畫出來）；畫面外就從 characters 拿掉" % speaker)
+    elif speaker and speaker not in cast and kind != "narration":
+        raise KeyError("說話的角色「%s」不在這一格（人在畫面外或透過通訊說話，對話框加 \"offscreen\": true）" % speaker)
+
+
 def compile_panel(project, page, panel, template_box, settings):
     """回傳一格的生圖工作：{id, page, slot, width, height, layout, prompt, negative, seeds}。"""
     pid = panel.get("id") or "p%03d_k%d" % (page["page"], panel["slot"])
@@ -157,10 +180,7 @@ def compile_panel(project, page, panel, template_box, settings):
                 items.append({"label": "text", "caption": "Bold hand-drawn manga sound effect lettering in black ink.",
                               "text": sfx["text"], "bbox": layout.to_moss_bbox(sfx["box"], width, height)})
         for bubble in panel.get("bubbles") or []:
-            if bubble.get("kind", "speech") not in BUBBLE_KINDS:
-                raise KeyError("對話框種類「%s」不認得（可用：%s）" % (bubble.get("kind"), "、".join(sorted(BUBBLE_KINDS))))
-            if bubble.get("speaker") and bubble["speaker"] not in seen and bubble.get("kind") != "narration":
-                raise KeyError("說話的角色「%s」不在這一格" % bubble["speaker"])
+            bubble_error(project, bubble, seen)
     except (KeyError, layout.LayoutError) as error:
         raise CompileError("%s：%s" % (where, error.args[0] if error.args else error))
 
@@ -207,7 +227,7 @@ def compile_chapter(project, storyboard, pages_data=None, only_page=None, overri
             continue
         tpl = pages_data["templates"].get(str(page.get("template")))
         if tpl is None:
-            raise CompileError("第 %s 頁：沒有這個格子模板「%s」（見 layouts/pages.json）" % (page.get("page"), page.get("template")))
+            raise CompileError("第 %s 頁：沒有這個格子模板「%s」（見 t2c/data/pages.json）" % (page.get("page"), page.get("template")))
         boxes = tpl["panels"]
         slots = [p.get("slot") for p in page.get("panels") or []]
         if sorted(slots) != list(range(1, len(boxes) + 1)):

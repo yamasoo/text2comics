@@ -1,5 +1,6 @@
 """後端共用：任務佇列、設定、錯誤轉換。"""
 from contextlib import contextmanager
+from pathlib import Path
 
 from fekit import ApiError, JobRunner
 
@@ -8,6 +9,9 @@ from t2c.adapt import AdaptError
 from t2c.compile import CompileError
 from t2c.project import ProjectError
 from t2c.render import RenderError
+
+ROOT = Path(__file__).resolve().parent.parent       # 工具資料夾：config.json、examples/ 在這裡（t2c 本身不假設）
+SAMPLE = ROOT / "examples" / "sample_comic"
 
 # 任務排隊、同時只跑一個：LLM 與 ComfyUI 不會被本工具同時叫起來（docs/05_介面設計.md 第 4 節）。
 runner = JobRunner(queue=True)
@@ -27,7 +31,7 @@ def guard(code="bad_request"):
 
 def config():
     try:
-        return settings.load()
+        return settings.load(root=ROOT)
     except (FileNotFoundError, ValueError) as error:
         raise ApiError(400, "讀不到工具設定：%s" % error, "no_config")
 

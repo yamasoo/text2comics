@@ -48,6 +48,14 @@
     const style = h("textarea", { rows: 2, placeholder: "畫風（英文，可留空用預設：黑白日式漫畫、網點、高對比）" });
     const mode = { blank: h("input", { type: "radio", name: "t2c-new", checked: true }), sample: h("input", { type: "radio", name: "t2c-new" }) };
     const renders = h("input", { type: "checkbox" });
+    const rendersNote = h("span", { class: "muted t2c-small" });
+    FE.api("/api/info", { signal: ctx.signal }).then((info) => {           // 範例的出圖不進版控，新下載的工具沒有
+      if (info && info.sample_renders === false) {
+        renders.checked = false;
+        renders.disabled = true;
+        rendersNote.textContent = "（這份範例沒有出圖，不能勾）";
+      }
+    }).catch(() => {});
     const browse = async () => {
       const dir = await FE.filepicker.open({ mode: "dir", title: "選擇要放新專案的上層資料夾" });
       if (dir) path.value = dir.replace(/[\\/]+$/, "") + (dir.includes("/") && !dir.includes("\\") ? "/" : "\\") + (title.value.trim() || "新作品");
@@ -69,7 +77,7 @@
         h("div", { class: "row" }, path, h("button", { class: "btn", type: "button", onclick: browse }, "選上層資料夾…")),
         h("div", { class: "row" }, h("label", { class: "check" }, mode.blank, "空白專案"),
           h("label", { class: "check" }, mode.sample, "複製範例「屋頂的便當」（一章、兩個角色，用來試流程）"),
-          h("label", { class: "check" }, renders, "連同範例的出圖（沒有 GPU 也能走完一章）")),
+          h("label", { class: "check" }, renders, "連同範例的出圖（沒有 GPU 也能走完一章）", rendersNote)),
         h("label", { class: "field" }, "作品名", title),
         h("label", { class: "field" }, "畫風", style),
         h("div", { class: "row" }, h("button", { class: "btn btn-primary", type: "button", onclick: create }, "建立"))));

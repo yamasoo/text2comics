@@ -1,5 +1,30 @@
 # 更新紀錄
 
+## 0.9.0 — 2026-11-09（M1 修正）
+
+依 `docs/qa/M1.md` 修 M-1、M-2、M-3 與 L-1–L-7。M-4（長得像的角色）等使用者決定記號；L-8–L-12 未動。
+
+- **M-1 畫面外的說話者（格式變更，`docs/02_資料格式.md` 第 4、5、10 節）**：
+  - 對話框新增種類 `radio`（通訊、電話、廣播：細密規則鋸齒的電子音框）與選填欄位 `offscreen`（預設 `false`）。`offscreen: true` 時 `speaker` 仍必填、必須是聖經角色，但**不可以**列在這一格的 `characters`；不送進生圖、不算進「exactly N people」。`thought`、`narration` 不能 offscreen。
+  - 嵌字：offscreen 的 speech／shout／whisper 尾巴指向最近的格框邊（左右優先）、伸出框外被框切掉；offscreen 的 radio 沒有尾巴；radio 但說話者在畫面上（螢幕裡的臉）尾巴照常。尾巴都能在嵌字頁覆寫。
+  - 劇本新增標記 `（通訊）`／`（電話）`／`（廣播）`／`（無線電）`→ radio，`（畫面外）`→ offscreen，可併寫 `（畫面外、喊）`；（通訊）不能再加語氣，（畫面外）不能和心聲併用。分鏡檢查會比對：劇本（通訊）→ kind 要 radio；劇本（畫面外）→ 要 offscreen。
+  - 提示詞：劇本規則加聲音來源標記與「隔著通訊對話時，每一格只畫一邊的人」；分鏡規則 4 改成「不在畫面上的人不要列進 characters，加 offscreen」（拿掉舊的「把他放在畫面邊緣」）；範例加一句 `阿杰（畫面外、喊）`。
+  - 介面：分鏡編輯區的對話框多「畫面外」勾選，勾了以後說話的人可以選不在這一格的角色；種類多「通訊（電子音）」。
+  - 舊的分鏡、劇本照樣能讀（沒有新欄位＝和以前一樣）。
+- **M-2 對話框閱讀順序**：
+  - `letter.order_conflict()`：右翻時後一個對話框會不會先被讀到（整個在上面、跑到右上方、差不多高但整個在右邊）。自動擺位的順序成本從 0.6 提高到 2.0 並改用這個判斷；擺完再檢查一次，順序顛倒就列警告、標 `order_issue`，嵌字頁把那個框畫成紅框。
+  - 分鏡檢查：anchor 順序顛倒列提醒（`check.anchor_order_issues`）。
+  - M1 的〈大夜班〉：31 組對話框裡順序錯的從 4 組變成 0 組，沒有新增壓臉。
+- **M-3 `t2c/` 自足**：`layouts/pages.json` → `t2c/data/pages.json`，`workflows/moss_layout.api.json` → `t2c/data/moss_layout.api.json`（**舊檔請刪掉**）。`settings.load(path=None, root=None)` 要由呼叫端給設定檔或所在資料夾；`workspace.create_project(..., sample=範例資料夾)` 取代 `from_sample=True`；新增 `comfy.workflow_path(cfg)`／`config_workflow(cfg)`：`comfy.workflow` 留空或舊寫法 `workflows/moss_layout.api.json` 都用內建的，相對路徑以 `config.json` 所在資料夾為準。`config.example.json` 的 `workflow` 改成空字串。工具資料夾的位置現在只在 `app.py`、`server/common.py`、`tools/*.py`。
+- **L-1** 外觀字：補髮色髮型（dark、tousled…）、twin tails、眼鏡、鬍子、光頭、`in a … uniform／dress`；`wearing a headset` 等道具放行；單獨出現的衣物名詞（jacket、lab coat）只提醒。
+- **L-2** 人改的分鏡有重複的格 id 或頁碼就不存檔。
+- **L-3** 忠實度報告：整句找不到時依句讀拆開再比（兩句原文併成一個對話框不算改寫）；兩三個字的短片段要和原著某一句整句相同才算，所以「……是我」這種改寫仍會列出。
+- **L-4** 規劃的 `source`（原著依據）在原著找不到時提醒（可用「……」省略中間）。
+- **L-5** 提示詞裡角色的「設定」只取卡片本文第一段（不再帶進「待確認」「原文依據」等標題）。
+- **L-6** 錯誤訊息裡引用的台詞，換行顯示成 ⏎。
+- **L-7** 範例的出圖不進版控：`test_create_project_from_sample_with_renders` 在範例沒有出圖時跳過；新建專案勾「連同範例的出圖」而範例沒有圖時，介面停用勾選、核心回明確的錯誤（`/api/info` 多回傳 `sample_renders`）。
+- 測試：新增 `tests/test_offscreen.py`（M-1）、`tests/test_portable.py`（M-3：只複製 `t2c/` 到別處也能 import、讀模板與 workflow、編譯一章）、`tests/test_m1_fixes.py`（M-2、L-1–L-6）；全部 335 項在雲端 Linux 通過，模擬新 clone（範例沒有出圖）也全過（2 項跳過）。
+
 ## 0.8.0 — 2026-11-09（S8：輸出）
 
 - 新增 `t2c/export.py`（只用標準函式庫與 Pillow）：已輸出的 `pages/chNNN/pNNN.png` → PDF 或 CBZ，整章或單頁，輸出到專案的 `out/`（不進版控）。格式見 `docs/02_資料格式.md` 第 15 節。

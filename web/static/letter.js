@@ -4,7 +4,7 @@
   "use strict";
   const { h, svg, PAGES } = FE;
 
-  const KIND_LABEL = { speech: "對話", thought: "心聲", shout: "喊叫", whisper: "悄悄話", narration: "旁白" };
+  const KIND_LABEL = { speech: "對話", thought: "心聲", shout: "喊叫", whisper: "悄悄話", radio: "通訊（電子音）", narration: "旁白" };
   const clamp01 = (v) => Math.min(1, Math.max(0, v));
   const r4 = (v) => Math.round(v * 10000) / 10000;
   const copy = (v) => JSON.parse(JSON.stringify(v));
@@ -275,9 +275,10 @@
       const shape = b.kind === "narration"
         ? svg("rect", { x: cx - b.rx, y: cy - b.ry, width: 2 * b.rx, height: 2 * b.ry })
         : svg("ellipse", { cx, cy, rx: b.rx, ry: b.ry });
-      shape.setAttribute("class", ["lt-bubble", selected && "lt-sel"].filter(Boolean).join(" "));
+      shape.setAttribute("class", ["lt-bubble", selected && "lt-sel", b.order_issue && "lt-order"].filter(Boolean).join(" "));
       shape.setAttribute("vector-effect", "non-scaling-stroke");
-      const body = svg("g", {}, shape, svg("title", {}, `${KIND_LABEL[b.kind] || b.kind}：${b.text}`));
+      const tip = `${KIND_LABEL[b.kind] || b.kind}：${b.text}${b.order_issue ? `\n⚠ 會比第 ${b.order_issue} 個先讀到（右翻：右邊、上面的先讀）` : ""}`;
+      const body = svg("g", {}, shape, svg("title", {}, tip));
       const group = svg("g", {}, body);
       const sel = { type: "bubble", pid: panel.id, index: b.index };
       draggable(shape, {
@@ -364,7 +365,7 @@
       return h("div", { class: "card card-flat stack" },
         h("p", { class: "card-title" }, `${KIND_LABEL[b.kind] || b.kind}（${panel.id} 第 ${b.index + 1} 個）`),
         h("p", { class: "lt-quote" }, b.text),
-        b.speaker ? h("p", { class: "muted" }, `說話的人：${b.speaker}`) : null,
+        b.speaker ? h("p", { class: "muted" }, `說話的人：${b.speaker}${b.offscreen ? "（畫面外）" : ""}`) : null,
         h("div", { class: "field" },
           h("label", {}, "字級 ", scaleLabel),
           h("input", {

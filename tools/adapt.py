@@ -16,7 +16,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 from t2c import adapt, llm, project, settings  # noqa: E402
 
@@ -63,7 +64,7 @@ def main():
     ap.add_argument("--stream", action="store_true", help="即時顯示模型輸出（除錯用）")
     args = ap.parse_args()
 
-    cfg = settings.load(args.config)
+    cfg = settings.load(args.config, root=ROOT)
     proj = project.Project(args.project)
     stages = ("plan", "script", "storyboard") if args.stage == "all" else (args.stage,)
     first = stages[0]

@@ -51,8 +51,8 @@ python tools\export.py examples\sample_comic 1 --format all          # 打包右
 | `t2c/prompts.py`、`t2c/adapt.py` | 文字端三階段的提示詞與流程（產生 → 驗證 → 回修） |
 | `t2c/script.py`、`t2c/check.py` | 劇本解析、忠實度報告；規劃與分鏡的驗證 |
 | `t2c/bible.py`、`t2c/bible_prompts.py`、`t2c/bible_check.py` | 視覺聖經：抽角色與地點 → 卡片草稿 → 規則檢查 → 定裝圖 → 服裝矩陣 |
-| `layouts/pages.json` | 頁面格子模板（右翻閱讀順序） |
-| `workflows/` | ComfyUI 的 API 格式 workflow |
+| `t2c/data/pages.json` | 頁面格子模板（右翻閱讀順序）；放在套件裡，整包搬走也帶著（M1 修正） |
+| `t2c/data/moss_layout.api.json` | 內建的 ComfyUI API 格式 workflow（`config.json` 的 `comfy.workflow` 留空就用它） |
 | `tools/panels.py` | 命令列：編譯／出圖 |
 | `tools/pages.py` | 命令列：選圖、組版、嵌字（頁面 PNG） |
 | `tools/export.py` | 命令列：輸出 PDF／CBZ（整章或單頁） |

@@ -52,9 +52,9 @@ def main(argv=None):
     if not args.render:
         return 0
 
-    cfg = settings.load(args.config)
+    cfg = settings.load(args.config, root=ROOT)
     base = cfg["comfy"]["url"]
-    workflow = comfy.load_workflow(ROOT / cfg["comfy"].get("workflow", "workflows/moss_layout.api.json"))
+    workflow = comfy.config_workflow(cfg)
     comfy_cfg = cfg["comfy"]
     presets = {k: v for k, v in (comfy_cfg.get("presets") or {}).items() if not k.startswith("_")}   # _說明 之類不是預設
     default_preset = comfy_cfg.get("default_preset") or None

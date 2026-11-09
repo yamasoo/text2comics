@@ -29,6 +29,7 @@
 .lt-tail.lt-manual { fill: #8a3b2e; }
 .lt-tail-line { stroke: #2a6fd6; stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
 .lt-sel { stroke-width: 3; stroke-dasharray: none; }
+.lt-bubble.lt-order, .lt-quiet .lt-bubble.lt-order { stroke: var(--err); stroke-opacity: 1; stroke-dasharray: none; stroke-width: 3; }   /* 右翻會先讀到它（M-2） */
 .lt-bubble.lt-sel { fill: rgba(42, 111, 214, .1); }
 .lt-quiet .lt-panel, .lt-quiet .lt-tail-line { display: none; }
 .lt-quiet .lt-face:not(.lt-sel), .lt-quiet .lt-bubble:not(.lt-sel), .lt-quiet .lt-sfx:not(.lt-sel) { stroke-opacity: 0; fill-opacity: 0; }
