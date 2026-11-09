@@ -192,7 +192,7 @@ def start_adapt(body: dict = Body(...)):
 # ---------------------------------------------------------------------------
 # 出圖
 # ---------------------------------------------------------------------------
-def run_render(job, proj, n, cfg, jobs, preset=None, force=False):
+def run_render(job, proj, n, cfg, jobs, preset=None, force=False, profile=None):
     """送 ComfyUI；每格一個 item、整體進度。回傳 (新出的張數, 略過的張數)。"""
     seeds_of = {j["id"]: (j["run_seeds"] if "run_seeds" in j else j["seeds"]) for j in jobs}
     for j in jobs:
@@ -219,7 +219,8 @@ def run_render(job, proj, n, cfg, jobs, preset=None, force=False):
     total = sum(len(s) for s in seeds_of.values())
     job.set(progress=(0, total))
     try:
-        render.render_jobs(proj, n, jobs, cfg, preset_name=preset, force=force, should_stop=lambda: job.stopping, on_event=on_event)
+        render.render_jobs(proj, n, jobs, cfg, preset_name=preset, force=force, should_stop=lambda: job.stopping, on_event=on_event,
+                           profile_name=profile)
     except render.Cancelled:
         raise JobStopped()
     except CORE_ERRORS as error:
@@ -230,23 +231,25 @@ def run_render(job, proj, n, cfg, jobs, preset=None, force=False):
     return counts["render"], counts["skip"]
 
 
-def render_task(job, root, n, page=None, panel=None, more=0, seed=None, preset=None, force=False):
+def render_task(job, root, n, page=None, panel=None, more=0, seed=None, preset=None, force=False, profile=None):
     proj = workspace.open_project(root)
     cfg = config_or_fail()
     try:
+        prof = render.resolve_profile(cfg, proj, profile)
+        default_profile = comfy.default_profile_name(cfg)
         jobs = render.chapter_jobs(proj, n, page=page, panel=panel)
-        chosen, _, default = render.resolve_preset(cfg, preset)
+        chosen, _, default = render.resolve_preset(cfg, preset, prof)
         if more:
-            render.plan_more(proj, n, jobs, int(more), chosen, default)
+            render.plan_more(proj, n, jobs, int(more), chosen, default, prof["name"], default_profile)
         elif seed is not None:
             for j in jobs:
                 j["run_seeds"] = [int(seed)]
             force = True
     except CORE_ERRORS as error:
         _fail(error)
-    job.say("出圖預設：%s" % (chosen or "（workflow 預設）"))
+    job.say("出圖 profile：%s（%s）；出圖預設：%s" % (prof["name"], prof["kind"], chosen or "（workflow 預設）"))
     wait_llm_released(job, cfg)
-    done, skipped = run_render(job, proj, n, cfg, jobs, chosen, force)
+    done, skipped = run_render(job, proj, n, cfg, jobs, chosen, force, prof["name"])
     return _result("新出 %d 張，略過 %d 張（已存在）" % (done, skipped), proj, n, ["panels"])
 
 
@@ -260,7 +263,7 @@ def start_render(body: dict = Body(...)):
     what = panel or ("第 %d 頁" % page if page else "整章")
     title = "第 %d 章出圖：%s%s" % (n, what, "（加畫 %d 張）" % more if more else "（重畫 seed %d）" % seed if seed is not None else "")
     return runner.start(render_task, str(proj.root), n, page, panel, more, seed, body.get("preset") or None, bool(body.get("force")),
-                        kind="render", title=title).summary()
+                        str(body.get("profile") or "") or None, kind="render", title=title).summary()
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +281,7 @@ def run_pages(job, proj, n, cfg, page=None):
             job.say(note, "dim")
         picks = compose.load_picks(proj, n)
         letters = letter.load_letters(proj, n)
-        pages_data = layout.load_pages()
+        pages_data = proj.pages()
     except CORE_ERRORS as error:
         _fail(error)
     warnings = []
@@ -321,7 +324,7 @@ def start_pages(body: dict = Body(...)):
 BATCH_LABEL = {"plan": "改編規劃", "script": "劇本", "storyboard": "分鏡", "render": "出圖", "pages": "輸出頁面"}
 
 
-def batch_task(job, root, n, stages, force=False, preset=None, want_pages=None):
+def batch_task(job, root, n, stages, force=False, preset=None, want_pages=None, profile=None):
     """規劃 → 劇本 → 分鏡（LLM）→ 釋放 VRAM → 出圖 → 輸出頁面。已有的檔案跳過（force 時重做 LLM 階段；出圖永遠只補沒畫過的）。"""
     proj = workspace.open_project(root)
     cfg = config_or_fail()
@@ -350,17 +353,20 @@ def batch_task(job, root, n, stages, force=False, preset=None, want_pages=None):
                 job.item(stage, state="done")
         elif stage == "render":
             try:
+                prof = render.resolve_profile(cfg, proj, profile)
+                default_profile = comfy.default_profile_name(cfg)
                 jobs = render.chapter_jobs(proj, n)
-                chosen, _, default = render.resolve_preset(cfg, preset)
+                chosen, _, default = render.resolve_preset(cfg, preset, prof)
             except CORE_ERRORS as error:
                 _fail(error)
             folder = compose.renders_dir(proj, n)
-            if all((folder / comfy.render_name(j["id"], s, chosen, default)).exists() for j in jobs for s in j["seeds"]):
+            if all((folder / comfy.render_name(j["id"], s, chosen, default, prof["name"], default_profile)).exists()
+                   for j in jobs for s in j["seeds"]):
                 job.say("每一格的候選圖都已經有了，略過出圖", "dim")
                 job.item(stage, state="skipped", note="都已出圖")
             else:
                 wait_llm_released(job, cfg)
-                done, skipped = run_render(job, proj, n, cfg, jobs, chosen, False)
+                done, skipped = run_render(job, proj, n, cfg, jobs, chosen, False, prof["name"])
                 summary.append("出圖：新出 %d 張，略過 %d 張" % (done, skipped))
                 job.item(stage, state="done")
         elif stage == "pages":
@@ -379,6 +385,7 @@ def start_batch(body: dict = Body(...)):
         raise ApiError(400, "至少要選一個階段", "bad_stage")
     pages = int(body["pages"]) if body.get("pages") else None
     return runner.start(batch_task, str(proj.root), n, stages, bool(body.get("force")), body.get("preset") or None, pages,
+                        str(body.get("profile") or "") or None,
                         kind="batch", title="第 %d 章整章批次：%s" % (n, "→".join(BATCH_LABEL[s] for s in stages))).summary()
 
 
@@ -426,19 +433,23 @@ def start_bible_extract(body: dict = Body(...)):
                         bool(body.get("force")), notes, kind="bible", title="視覺聖經：掃描原著＋成卡").summary()
 
 
-def bible_sheet_task(job, root, ids=None, views=("full",), candidates=None, preset=None, force=False, more=0):
+def bible_sheet_task(job, root, ids=None, views=("full",), candidates=None, preset=None, force=False, more=0, profile=None):
     proj = workspace.open_project(root)
     cfg = config_or_fail()
     try:
+        prof = render.resolve_profile(cfg, proj, profile)
+        default_profile = comfy.default_profile_name(cfg)
         jobs, manifest = bible.sheet_jobs(proj, ids=ids or None, views=tuple(views), candidates=candidates)
-        chosen, _, default = bible.resolve_preset(cfg, preset)
+        chosen, _, default = bible.resolve_preset(cfg, preset, prof)
         if more:
             folder = bible.renders_dir(proj)
+            want_profile = render.file_profile(prof["name"], default_profile)
             for j in jobs:
                 have = set()
                 for path in folder.glob(j["id"] + "_s*.png") if folder.is_dir() else []:
                     m = bible.RENDER_RE.match(path.name)
-                    if m and m.group("job") == j["id"] and (m.group("preset") or "") == (chosen if chosen != default else ""):
+                    if m and m.group("job") == j["id"] and (m.group("preset") or "") == (chosen if chosen != default else "") \
+                            and (m.group("profile") or "") == want_profile:
                         have.add(int(m.group("seed")))
                 j["seeds"] = workspace.next_seeds(j, int(more), have, proj.config.get("seed_base", 0))
     except CORE_ERRORS as error:
@@ -458,7 +469,7 @@ def bible_sheet_task(job, root, ids=None, views=("full",), candidates=None, pres
         job.say(("略過（已存在）%s" if ev["kind"] == "skip" else "✓ %s") % ev["file"], "dim" if ev["kind"] == "skip" else "info")
 
     try:
-        written = bible.render_sheets(proj, jobs, manifest, cfg, preset_name=preset, force=force,
+        written = bible.render_sheets(proj, jobs, manifest, cfg, preset_name=preset, force=force, profile_name=prof["name"],
                                       should_stop=lambda: job.stopping, on_event=on_event)
     except llm.Cancelled:
         raise JobStopped()
@@ -476,4 +487,4 @@ def start_bible_sheet(body: dict = Body(...)):
     more = max(0, min(int(body.get("more") or 0), 8))
     title = "定裝圖：%s%s" % ("、".join(ids) if ids else "全部", "（加畫 %d 張）" % more if more else "")
     return runner.start(bible_sheet_task, str(proj.root), ids, views, candidates, body.get("preset") or None,
-                        bool(body.get("force")), more, kind="bible", title=title).summary()
+                        bool(body.get("force")), more, str(body.get("profile") or "") or None, kind="bible", title=title).summary()

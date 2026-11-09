@@ -7,6 +7,10 @@
   const STATE = { ok: ["✓ 已挑", "ok"], stale: ["⚠ 過期", "warn"], none: ["－ 未挑", ""], missing: ["✗ 缺卡", "err"] };
   const stripFront = (text) => String(text || "").replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
   const cardHash = (c) => FE.hash("bible", c.kind, c.id, c.draft ? { draft: 1 } : {});
+  // 出圖 profile（F2）：一組 profile＝ComfyUI 上的一組模型；文字顯示「<kind> · <unet 檔名>」，值是名稱。
+  const profileList = (env) => ((env && env.comfy && env.comfy.profiles) || [])
+    .map((p) => (typeof p === "string" ? { name: p, kind: p, unet: "" } : p)).filter((p) => p && p.name);
+  const profileLabel = (p) => `${p.kind || p.name} · ${p.unet || "（沒有指定模型）"}`;
 
   function extractDialog() {
     const min = T2C.num(2, { min: 1, max: 99 });
@@ -32,20 +36,64 @@
     });
   }
 
-  function sheetDialog(ids, env) {
+  function sheetDialog(ids, env, ctx) {
     const full = h("input", { type: "checkbox", checked: true });
     const bust = h("input", { type: "checkbox" });
     const count = T2C.num("", { min: 1, max: 8, placeholder: "依 project.yaml" });
     const more = T2C.num("", { min: 1, max: 8, placeholder: "－" });
-    const presets = (env && env.presets) || [];
-    const preset = h("select", {}, presets.map((p) => h("option", { value: p, selected: p === (env && env.default_preset) }, p)));
+    // 出圖預設是「這一組 profile 自己的」：換 profile 要重填清單，不然會送出別組的 preset（伺服器會擋）。
+    const presetHost = h("span", { class: "row t2c-tight" });
+    const preset = h("select", { "aria-label": "出圖預設" });
+    let presetList = [];
+    let presetDefault = "";
+    function fillPresets(list, def) {
+      presetList = Array.isArray(list) ? list : [];
+      presetDefault = def || "";
+      const value = presetList.indexOf(preset.value) >= 0 ? preset.value : (presetDefault || presetList[0] || "");
+      preset.replaceChildren(...(presetList.length
+        ? presetList.map((p) => h("option", { value: p, selected: p === value }, p === presetDefault ? p + "（預設）" : p))
+        : [h("option", { value: "" }, "（這一組沒有 presets）")]));
+      presetHost.replaceChildren(...(presetList.length
+        ? [h("label", { class: "row t2c-inline" }, "出圖預設", preset)]
+        : [h("span", { class: "muted t2c-small" }, "這一組沒有 presets，出圖會用 workflow 自己的取樣設定。")]));
+    }
+    fillPresets((env && env.presets) || [], (env && env.default_preset) || "");
+    // 出圖 profile：同一臺 ComfyUI 一次只掛一組模型，換 profile 就要先去 ComfyUI 換成那一組的模型。
+    const profs = profileList(env);
+    const profNow = (env && env.comfy && env.comfy.profile) || "";
+    const profNote = h("p", { class: "muted t2c-small" });
+    const profile = h("select", { "aria-label": "出圖 profile", onchange: () => { loadProfile(); } },
+      profs.map((p) => h("option", { value: p.name, selected: p.name === profNow }, profileLabel(p))));
+    const pickedProf = () => profs.find((p) => p.name === profile.value) || profs[0] || null;
+    function syncProfNote() {
+      const p = pickedProf();
+      const missing = p && !p.unet;
+      profNote.textContent = (missing ? "⚠ 這一組還沒有填 unet 模型檔名，出圖會失敗（先到設定頁補）。" : "")
+        + "同一臺 ComfyUI 一次只掛一組模型：換 profile 就要先在 ComfyUI 換成那一組的模型。"
+        + (p ? "目前：" + profileLabel(p) + "。" : "");
+    }
+    async function loadProfile() {
+      syncProfNote();
+      const next = profile.value;
+      if (!next) return;
+      try {
+        const fresh = await T2C.get("/api/env", { profile: next }, ctx);
+        fillPresets(fresh.presets || [], fresh.default_preset || "");
+      } catch (error) {
+        if (error.name === "AbortError") throw error;
+        FE.fail(error);
+      }
+    }
+    syncProfNote();
     FE.modal({
       title: ids && ids.length ? `定裝圖：${ids.join("、")}` : "定裝圖：全部定案的角色與地點",
       body: h("div", { class: "stack" },
         h("p", { class: "muted" }, "角色每套服裝一張（3:4），地點一張空鏡（4:3）。已經有的跳過；「加畫」會用新的 seed 再多畫幾張。"),
         h("div", { class: "row" }, h("label", { class: "check" }, full, "全身"), h("label", { class: "check" }, bust, "胸像")),
         h("div", { class: "row" }, h("label", { class: "row t2c-inline" }, "每張幾個候選", count), h("label", { class: "row t2c-inline" }, "或加畫", more),
-          presets.length ? h("label", { class: "row t2c-inline" }, "出圖預設", preset) : null)),
+          presetHost),
+        profs.length ? h("div", { class: "stack t2c-tight" },
+          h("label", { class: "row t2c-inline" }, "出圖 profile", profile), profNote) : null),
       foot: (done) => [
         h("button", { class: "btn", type: "button", onclick: () => done() }, "取消"),
         h("button", { class: "btn btn-primary", type: "button", onclick: () => {
@@ -53,7 +101,8 @@
           if (!views.length) return FE.toast("至少選一種視角", "warn");
           done();
           T2C.run("/api/task/bible_sheet", { ids: ids || [], views, candidates: count.value ? Number(count.value) : null,
-            more: more.value ? Number(more.value) : 0, preset: preset.value || null });
+            more: more.value ? Number(more.value) : 0, preset: presetList.length ? (preset.value || null) : null,
+            profile: profs.length ? (profile.value || null) : null });
         } }, "出圖"),
       ],
     });
@@ -61,7 +110,7 @@
 
   async function withEnv(ctx, fn) {
     let env = null;
-    try { env = await FE.api("/api/env", { signal: ctx.signal }); } catch (error) { if (error.name === "AbortError") return; }
+    try { env = await T2C.get("/api/env", {}, ctx); } catch (error) { if (error.name === "AbortError") return; }
     fn(env);
   }
 
@@ -135,7 +184,7 @@
       h("div", { class: "row" }, h("h1", { class: "t2c-title grow" }, "視覺聖經"),
         h("button", { class: "btn", type: "button", onclick: () => newCardDialog() }, "新增卡片…"),
         h("button", { class: "btn", type: "button", onclick: extractDialog }, "掃描原著＋成卡…"),
-        h("button", { class: "btn btn-primary", type: "button", onclick: () => withEnv(ctx, (env) => sheetDialog([], env)) }, "定裝圖出圖…")),
+        h("button", { class: "btn btn-primary", type: "button", onclick: () => withEnv(ctx, (env) => sheetDialog([], env, ctx)) }, "定裝圖出圖…")),
       h("p", { class: "muted" }, "角色外觀只有一個來源：這裡的 look_en 與服裝。分鏡只寫角色 id，編譯時逐字貼上。"),
       draftList,
       unlisted.length ? h("div", { class: "alert alert-warn stack t2c-tight" }, "改編規劃裡出現、但還沒有卡片的人物：",
@@ -190,7 +239,7 @@
     const sheets = draft ? h("div", { class: "alert alert-info" }, "草稿還不能出定裝圖：確認入庫之後再出。")
       : h("section", { class: "stack" },
         h("div", { class: "row" }, h("h2", { class: "t2c-h2 grow" }, "定裝圖"),
-          h("button", { class: "btn btn-primary", type: "button", onclick: () => withEnv(ctx, (env) => sheetDialog([id], env)) }, "出圖…")),
+          h("button", { class: "btn btn-primary", type: "button", onclick: () => withEnv(ctx, (env) => sheetDialog([id], env, ctx)) }, "出圖…")),
         renders.files.length ? Object.entries(groups).map(([label, files]) => h("div", { class: "stack t2c-tight" }, h("b", {}, label),
           h("div", { class: "pn-cands" }, files.map((f) => h("figure", { class: ["pn-cand", f.picked && "pn-picked"] },
             h("button", { class: "pn-thumb", type: "button", title: "選這張", onclick: () => pick(f.file) }, h("img", { src: T2C.img(f.path, 260), alt: f.file, loading: "lazy" })),

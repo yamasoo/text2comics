@@ -13,12 +13,12 @@
 """
 import json
 
-from . import check, layout, llm, prompts, script as sc
+from . import annotate, check, layout, llm, prompts, script as sc
 from .compile import CompileError, compile_chapter
 
 PANEL_FIELDS = ("slot", "shot", "angle", "location", "scene", "characters", "objects", "sfx", "bubbles")
-STAGES = ("plan", "script", "storyboard")
-STAGE_KEY = {"plan": "adapt"}       # config.json 的 stage_providers／reasoning 用的階段名稱：adapt、script、storyboard
+STAGES = ("annotate", "plan", "script", "storyboard")
+STAGE_KEY = {"annotate": "annotate", "plan": "adapt"}   # config.json 的 stage_providers／reasoning 用的階段名稱
 
 
 class AdaptError(Exception):
@@ -33,7 +33,7 @@ class Adapter:
             raise AdaptError("需要指定 provider（prov 或 prov_for）")
         self.project = project
         self._prov_for = prov_for or (lambda stage_key: prov)
-        self.pages_data = pages_data or layout.load_pages()
+        self.pages_data = pages_data or project.pages()
         self.should_stop = should_stop
         self.on_event = on_event
         self.on_delta = on_delta
@@ -137,7 +137,7 @@ class Adapter:
         plan = self.project.load_plan(chapter)
         pp = self._plan_page(plan, page_no)
         return prompts.script_messages(self.project, self.project.load_source(chapter), plan, pp, self.pages_data,
-                                       self._existing_page_text(chapter, page_no - 1))
+                                       self._existing_page_text(chapter, page_no - 1), self._scenes(chapter))
 
     @staticmethod
     def _plan_page(plan, page_no):
@@ -162,6 +162,7 @@ class Adapter:
             if not path.is_file():
                 raise AdaptError("%s 還不存在，無法只重寫部分頁。請先產生整章劇本" % path)
             blocks = dict(sc.split_pages(sc.split_front(path.read_text(encoding="utf-8"))[1]))
+        scenes = self._scenes(chapter)                        # 切對話的逐字台詞帳本（沒有就不附）
         want = sorted(set(only_pages)) if only_pages else [p["page"] for p in plan["pages"]]
         for page_no in want:
             plan_page = self._plan_page(plan, page_no)
@@ -169,7 +170,7 @@ class Adapter:
             n_panels = len(self.pages_data["templates"][tpl_key]["panels"])
             tpl_name = self.pages_data["templates"][tpl_key].get("name", "")
             prev = blocks.get(page_no - 1, "")
-            messages = prompts.script_messages(self.project, source, plan, plan_page, self.pages_data, prev)
+            messages = prompts.script_messages(self.project, source, plan, plan_page, self.pages_data, prev, scenes)
 
             def validate(text, page_no=page_no, tpl_key=tpl_key, n_panels=n_panels, tpl_name=tpl_name):
                 body = sc.strip_fence(text)
@@ -199,6 +200,53 @@ class Adapter:
         return "\n".join(head) + "\n\n".join(blocks[k] for k in sorted(blocks)) + "\n"
 
     # --- ③ 分鏡 -------------------------------------------------------------
+    # --- ⓪ 切對話 ----------------------------------------------------------
+    def _scenes(self, chapter):
+        """scenes/chNNN.json（有就回傳，壞掉或沒有回傳 None）：劇本階段靠它拿到逐字台詞帳本。"""
+        try:
+            return self.project.load_scenes(chapter)
+        except Exception:
+            return None
+
+    def annotate_prompt(self, chapter, title_hint=""):
+        paragraphs = annotate.split_paragraphs(self.project.load_source(chapter))
+        return prompts.annotate_messages(self.project, paragraphs, title_hint), paragraphs
+
+    def run_annotate(self, chapter, title_hint="", force=False, repair=True):
+        """小說 → 場 → 旁白／對話／演出（scenes/chNNN.json）＋忠實度報告。回傳 (scenes, report)。"""
+        path = self.project.scenes_path(chapter)
+        self._guard_overwrite(path, force)
+        source = self.project.load_source(chapter)
+        paragraphs = annotate.split_paragraphs(source)
+        if not paragraphs:
+            raise AdaptError("原著是空的：%s" % self.project.source_path(chapter))
+        messages = prompts.annotate_messages(self.project, paragraphs, title_hint)
+
+        def validate(data):
+            expanded = annotate.expand(data, self.project, chapter, paragraphs, title_hint)
+            issues = list(expanded.issues)
+            if not issues:                       # 展開沒問題 → 先確認轉成分鏡後不會被擋
+                try:
+                    board = annotate.to_storyboard(self.project, expanded.scene_doc, self.pages_data,
+                                                   compile_check=False)
+                except annotate.AnnotateError as error:
+                    issues.append(sc.Issue("error", "", str(error)))
+                else:
+                    for page in board["pages"]:
+                        issues += check.check_page_panels(self.project, page["page"], page["template"],
+                                                          page["panels"], self.pages_data)
+            return expanded, issues
+
+        expanded = self._generate(chapter, "annotate", "整章", messages, validate)
+        scene_doc = expanded.scene_doc
+        added = annotate.repair_omissions(scene_doc, annotate.paragraph_map(paragraphs)) if repair else 0
+        report = annotate.fidelity(scene_doc, source, added)
+        self._write(path, json.dumps(scene_doc, ensure_ascii=False, indent=2) + "\n")
+        self._write(self.project.out_dir("build", "adapt") / ("ch%03d_scenes_fidelity.md" % int(chapter)),
+                    annotate.fidelity_markdown(report, scene_doc.get("title") or title_hint))
+        self.emit("saved", stage="annotate", path=str(path))
+        return scene_doc, report
+
     def _load_script(self, chapter):
         path = self.project.script_path(chapter)
         if not path.is_file():

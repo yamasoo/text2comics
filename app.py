@@ -27,7 +27,7 @@ from t2c import __version__ as T2C_VERSION  # noqa: E402
 from t2c.compile import CompileError, compile_chapter  # noqa: E402
 from t2c.project import Project, ProjectError  # noqa: E402
 
-from server import bible_api, project_api, tasks  # noqa: E402
+from server import bible_api, project_api, settings_api, tasks  # noqa: E402
 from server.common import SAMPLE, runner  # noqa: E402
 
 WEB = ROOT / "web"
@@ -38,7 +38,7 @@ app = FastAPI()
 # 本機保護（Host、權杖）、錯誤格式、任務端點 /api/jobs…。必須在 app 開始服務前呼叫。
 # 任務排隊、同時只跑一個（server/common.py）：LLM 與 ComfyUI 不會被本工具同時叫起來。
 fe = install(app, app_name="text2comics", jobs=runner)
-for module in (project_api, bible_api, tasks):
+for module in (project_api, bible_api, settings_api, tasks):
     app.include_router(module.router)
 
 
@@ -122,7 +122,7 @@ def _draft(project, chapter, page, panels):
 
 
 def _render(project, chapter, page, picks, letters, guides=False):
-    pages_data = layout.load_pages()
+    pages_data = project.pages()
     settings = _lettering()
     art, art_warnings = _art(project, chapter, page, pages_data, picks)
     try:
@@ -174,7 +174,7 @@ def letter_plan_draft(body: dict = Body(...)):
 @app.get("/api/letter/art.png")
 def letter_art(project: str = "", chapter: int = 1, page: int = 1):
     proj, _, pg, picks = _open(project, chapter, page)
-    return _png(_art(proj, chapter, pg, layout.load_pages(), picks)[0])
+    return _png(_art(proj, chapter, pg, proj.pages(), picks)[0])
 
 
 @app.get("/api/letter/preview.jpg")
@@ -197,7 +197,7 @@ def letter_save(body: dict = Body(...)):
     letters = _draft(proj, chapter, pg, body.get("panels") or {})
     canvas, plan = _render(proj, chapter, pg, picks, letters)
     path = letter.save_letters(proj, chapter, letters)
-    out = compose.save_page(canvas, compose.pages_dir(proj, chapter) / ("p%03d.png" % page), layout.load_pages())
+    out = compose.save_page(canvas, compose.pages_dir(proj, chapter) / ("p%03d.png" % page), proj.pages())
     return {"letters": str(path), "page_png": str(out), "warnings": plan["warnings"]}
 
 

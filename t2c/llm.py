@@ -77,13 +77,42 @@ def find_provider(cfg, provider_id=None, stage=None):
 KEYRING_SERVICE = "novel-studio"   # 與 Novel Studio、text_2_visual_novel 共用同一個系統金鑰庫項目（只讀不寫）
 
 
-def _keyring_get(account):
+def keyring_available():
+    """系統金鑰庫能不能用（沒裝 keyring 回 False）。"""
+    try:
+        import keyring
+    except Exception:
+        return False
+    return hasattr(keyring, "get_password")
+
+
+def keyring_get(account):
     """讀系統金鑰庫（Windows 認證管理員等）。沒裝 keyring 或沒有這筆就回傳空字串。"""
     try:
         import keyring
         return (keyring.get_password(KEYRING_SERVICE, account) or "").strip()
     except Exception:
         return ""
+
+
+def keyring_set(account, secret):
+    """把金鑰存進系統金鑰庫（只存金鑰庫，絕不寫任何檔案）。沒裝 keyring 丟 LLMError。"""
+    secret = str(secret or "").strip()
+    if not secret:
+        raise LLMError("金鑰是空的")
+    try:
+        import keyring
+    except Exception as error:
+        raise LLMError("沒有安裝 keyring：請在 Python 環境執行 pip install keyring（%s）" % error)
+    try:
+        keyring.set_password(KEYRING_SERVICE, account, secret)
+    except Exception as error:
+        raise LLMError("存不進系統金鑰庫（服務 %s、帳號 %s）：%s" % (KEYRING_SERVICE, account, error))
+
+
+def _keyring_get(account):
+    """舊呼叫端沿用的名稱（api_key 用）。"""
+    return keyring_get(account)
 
 
 def api_key(prov):

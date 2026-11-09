@@ -44,7 +44,7 @@
     const next = numbers.find((x) => x > n);
     const batch = async () => {
       let env = null;
-      try { env = await FE.api("/api/env", { signal: ctx.signal }); } catch (error) { if (error.name === "AbortError") return; }
+      try { env = await T2C.get("/api/env", {}, ctx); } catch (error) { if (error.name === "AbortError") return; }
       T2C.batchDialog(n, env);
     };
     ctx.view(h("div", { class: "stack t2c-page" },

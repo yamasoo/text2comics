@@ -14,16 +14,28 @@
 """
 import json
 
-from . import layout
+from . import layout, styles
 from .compile import ANGLE, BUBBLE_KINDS, SHOT
 from .project import read_front_matter
-from .script import ANGLE_WORDS, MARKS, MAX_BUBBLES, RADIO_MARKS, SHOT_WORDS
+from .script import ANGLE_WORDS, MARKS, MAX_BUBBLES, OFFSCREEN_MARKS, RADIO_MARKS, SHOT_WORDS
 
 SYSTEM = (
-    "你是日本漫畫的責任編輯兼分鏡師，負責把小說改編成日式黑白頁漫（由右往左閱讀）。"
+    "你是日本漫畫的責任編輯兼分鏡師，負責把小說改編成{look}（由右往左閱讀）。"
     "你的輸出會被程式直接讀取，所以格式必須完全照指示；不要加前言、說明、結語，也不要用 ``` 圍欄。"
     "用繁體中文（台灣用語）；指定要寫英文的欄位才寫英文。"
 )
+
+
+def system(look=None):
+    """組好的 system 提示詞；look 省略時用預設畫風（mono）。"""
+    if look is None:
+        look = styles.resolve()["look"]
+    return SYSTEM.format(look=look)
+
+
+def _look(project):
+    """這個專案的畫風描述（styles.resolve 的 look）。"""
+    return styles.resolve(project.config)["look"]
 
 
 # ---------------------------------------------------------------------------
@@ -120,17 +132,103 @@ def template_catalog(pages_data):
 
 
 # ---------------------------------------------------------------------------
+# ⓪ 切對話（N3）：小說 → 場 → 旁白／對話／演出，每一句帶 source_para
+# ---------------------------------------------------------------------------
+EXAMPLE_ANNOTATE = """{"scenes": [
+  {"title": "屋簷下的雨", "location": "street", "setting_en": "Heavy rain pours beyond a shop awning at dusk; the pavement is soaked and the street is empty.",
+   "cast": [{"id": "jie", "expression": "drenched but cheerful"}, {"id": "qing", "expression": "surprised"}],
+   "ops": [{"k": "N", "p": 1},
+           {"k": "x", "shot": "medium", "angle": "eye", "note": "A young man holds out a folded umbrella to a young woman under the awning."},
+           {"k": "d", "p": 2, "s": "jie", "t": "「拿去，我跑一下就到了。」"},
+           {"k": "n", "p": 3, "t": "小晴低頭看著手裡的傘。"},
+           {"k": "d", "p": 3, "s": "qing", "m": "心聲", "t": "「……這個笨蛋。」"}]}
+]}"""
+
+ANNOTATE_RULES = """# 任務：切對話
+把下面這一章小說拆成一場一場，每一場照原著順序寫出旁白、對話與演出。這一份是後面分鏡唯一的台詞來源，
+所以台詞與旁白**只能照抄原著**：程式會逐字比對，抄錯就一直退回重寫。
+
+## 什麼是一場
+同一個地點、同一段時間、同一批人。地點、時間或焦點換了就是新的一場；一場最多涵蓋 35 個段落。
+
+## 輸出格式（只輸出這個 JSON）
+{"scenes": [
+  {"title": "這一場的短標題（中文）",
+   "location": "地點 id（見下表；沒有合適的就省略）",
+   "setting_en": "英文一到兩句：這一場看得見的畫面（時間、光線、空間、天氣）",
+   "cast": [{"id": "角色id", "expression": "英文表情"}],
+   "ops": [這一場依原著順序的指令]}
+]}
+
+## 四種 op
+- {"k": "N", "p": 3}：整段旁白，把第 3 段原文照抄成旁白。**段落裡有引號台詞時不能用 N。**
+- {"k": "n", "p": 3, "t": "原文的一小段"}：段落裡的一段敘述，t 是該段原文的子句。
+- {"k": "d", "p": 3, "s": "角色id", "t": "「台詞。」", "m": "心聲"}：一句對話，t 逐字照抄（含引號）；m 省略就是普通說話。
+- {"k": "x", "shot": "close", "angle": "eye", "note": "英文：這一格的重點"}：演出，只影響畫面，不算台詞。
+
+## 規則
+1. **逐字**：n 與 d 的 t 只能從 p 那一段複製（可以只取一部分、可以拆成幾句），不能改寫、不能漏字、不能自己編。
+2. **每一段都要用到**：p 是段落號（1–N），照原著順序，不能跳段、不能倒退。一段可以拆成多個 op（引號台詞用 d，引號外的敘述用 n）。
+3. **旁白不要吞掉台詞**：段落裡有「」台詞就一定要用 d；引號外的敘述再用 n。
+4. **角色**：cast 與 s 只能用下面聖經的 id。原著有、聖經沒有的名字不要放進 cast：那句改成旁白，或改由在場的人說。
+5. 說話的人要列在該場 cast；程式會補，但請一律寫清楚，expression 寫這一場的表情。
+6. **m（括號標記）**只能用：@MARKS@。要併寫就用「、」（例：畫面外、喊）。透過通訊器、電話、廣播的聲音標通訊，不用再加語氣；心聲不能標畫面外。
+7. **英文欄位**：setting_en、expression、note 一律英文（會進生圖提示詞）。台詞、旁白、標題保持繁體中文原文。不要寫角色的長相、髮型、衣著（那是視覺聖經的事），只寫畫面、光線、動作與情緒。
+8. **演出 x** 決定接下來幾格怎麼拍：shot 用 @SHOTS@；angle 用 @ANGLES@。重要情緒用 close 或 extreme_close，大場面用 wide，換場時可以換角度。
+9. 不要加前言、不要用三個反引號的圍欄、不要加註解；只輸出 JSON。""".replace(
+    "@SHOTS@", "、".join(SHOT)).replace("@ANGLES@", "、".join(ANGLE)).replace(
+    "@MARKS@", "、".join(["心聲", "喊", "喊叫", "小聲", "悄聲"] + list(RADIO_MARKS) + list(OFFSCREEN_MARKS)))
+
+
+def annotate_messages(project, paragraphs, title_hint=""):
+    """切對話：整章一次產生。段落編號（〔n〕）就是 source_para 的 p。"""
+    body = "\n\n".join("〔%d〕%s" % (index, text) for index, text in enumerate(paragraphs or [], 1))
+    parts = [ANNOTATE_RULES, "", "## 格式範例（人物與場景是虛構的，只示範寫法）", EXAMPLE_ANNOTATE, "",
+             bible_block(project, with_body=False, with_look=False), ""]
+    if title_hint:
+        parts += ["## 章名", title_hint, ""]
+    parts += ["## 本章原著（〔n〕就是 op 的 p，共 %d 段）" % len(paragraphs or []),
+              "<<<原著開始", body, "原著結束>>>"]
+    return [{"role": "system", "content": system(_look(project))}, {"role": "user", "content": "\n".join(parts)}]
+
+
+KIND_MARKS = {"thought": "心聲", "shout": "喊", "whisper": "小聲", "radio": "通訊"}
+
+
+def scenes_ledger(scene_doc):
+    """切對話的逐字帳本：給劇本階段照抄台詞用（台詞只有一個來源）。"""
+    lines = []
+    for index, scene in enumerate(scene_doc.get("scenes") or [], 1):
+        head = "第 %d 場" % index
+        if scene.get("title"):
+            head += "　%s" % scene["title"]
+        if scene.get("location"):
+            head += "（%s）" % scene["location"]
+        lines.append(head)
+        for line in scene.get("lines") or []:
+            if line.get("type") == "narration":
+                lines.append("- 旁白：%s〔p%s〕" % (line.get("text"), line.get("source_para")))
+            elif line.get("type") == "dialogue":
+                marks = [KIND_MARKS[line["kind"]]] if line.get("kind") in KIND_MARKS else []
+                if line.get("offscreen"):
+                    marks.append("畫面外")
+                mark = "（%s）" % "、".join(marks) if marks else ""
+                lines.append("- %s%s：%s〔p%s〕" % (line.get("speaker"), mark, line.get("text"), line.get("source_para")))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # ① 改編規劃
 # ---------------------------------------------------------------------------
-PLAN_RULES = """# 任務：改編規劃
-把下面這一章小說規劃成日式黑白頁漫。這一步只決定「分幾頁、每頁用哪個模板、每格演什麼」，不寫台詞。
+_PLAN_RULES = """# 任務：改編規劃
+把下面這一章小說規劃成%(look)s。這一步只決定「分幾頁、每頁用哪個模板、每格演什麼」，不寫台詞。
 
 ## 改編原則
 1. **忠於原著**：不新增原著沒有的情節、角色、設定；因果關係與關鍵台詞要保留。可以刪、可以併，不可以改劇情。
 2. **漫畫靠畫面說故事**：原著的心理描寫、環境描寫，能變成表情、動作、場景的就畫出來；必要時才用旁白或心聲。
 3. **一頁一個小節奏**：每頁有它的作用（建立場景／衝突升高／轉折／收尾），頁末最好留一個讓人想翻頁的點（懸念、轉折、情緒停頓）。
 4. **格數看節奏**：對話密集、情緒細膩的頁用 4–6 格；大場面、重要轉折用 1–3 格；不要整章都用同一個模板。
-5. **一格只放一個瞬間**：一格裡的動作與台詞要能在同一個畫面裡成立，台詞每格最多 %d 個對話框。
+5. **一格只放一個瞬間**：一格裡的動作與台詞要能在同一個畫面裡成立，台詞每格最多 %(max)d 個對話框。
 6. **角色只能用聖經裡的 id**。原著出現、但聖經沒有角色卡的人物，不要放進格子，把名字列在 unlisted_characters。
 7. 被你刪掉或大幅濃縮的原著內容，簡短列在 omitted（一句話寫明刪了什麼、為什麼），方便人工檢查。
 
@@ -152,7 +250,12 @@ PLAN_RULES = """# 任務：改編規劃
   "omitted": ["刪掉的內容與理由"],
   "unlisted_characters": ["原著有、聖經沒有的人物名字"]
 }
-pages 依閱讀順序，page 從 1 開始連號；每頁 panels 的 slot 要剛好是 1 到該模板的格數。""" % MAX_BUBBLES
+pages 依閱讀順序，page 從 1 開始連號；每頁 panels 的 slot 要剛好是 1 到該模板的格數。"""
+
+
+def plan_rules(look):
+    """改編規劃的規則；畫風描述跟著 look 走。"""
+    return _PLAN_RULES % {"look": look, "max": MAX_BUBBLES}
 
 
 def plan_messages(project, source, pages_data, want_pages=None, title_hint=""):
@@ -160,12 +263,12 @@ def plan_messages(project, source, pages_data, want_pages=None, title_hint=""):
         size = "請規劃成剛好 **%d 頁**。" % want_pages
     else:
         size = "頁數由你決定：大約每 400–600 字原著一頁；對話密集或動作場面可以多給幾頁，純敘述可以濃縮。"
-    parts = [PLAN_RULES, "", "## 頁面模板（格子編號就是閱讀順序：右上先、同排由右到左、再往下一排）", template_catalog(pages_data), "",
+    parts = [plan_rules(_look(project)), "", "## 頁面模板（格子編號就是閱讀順序：右上先、同排由右到左、再往下一排）", template_catalog(pages_data), "",
              bible_block(project, with_body=True, with_look=False), "", "## 篇幅", size]
     if title_hint:
         parts += ["", "章名：" + title_hint]
     parts += ["", "## 本章原著", "<<<原著開始", source.strip(), "原著結束>>>"]
-    return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "\n".join(parts)}]
+    return [{"role": "system", "content": system(_look(project))}, {"role": "user", "content": "\n".join(parts)}]
 
 
 # ---------------------------------------------------------------------------
@@ -225,18 +328,22 @@ def _plan_page_text(plan_page, shapes):
     return "\n".join(lines)
 
 
-def script_messages(project, source, plan, plan_page, pages_data, prev_script=""):
+def script_messages(project, source, plan, plan_page, pages_data, prev_script="", scenes=None):
+    """scenes：切對話的結果（scenes/chNNN.json）。有給就附上逐字台詞帳本，台詞只從帳本挑。"""
     shapes = panel_shapes(pages_data, plan_page["template"])
     tpl_name = pages_data["templates"][str(plan_page["template"])].get("name", "")
     parts = [SCRIPT_RULES, "", "## 格式範例（人物與場景是虛構的，只示範寫法）", "```", EXAMPLE_SCRIPT, "```", "",
              bible_block(project, with_body=True, with_look=False), "",
              "## 章：%s" % (plan.get("title") or ""), "全章共 %d 頁。本章概要：%s" % (len(plan["pages"]), plan.get("summary", "")), "",
              "## 本章原著", "<<<原著開始", source.strip(), "原著結束>>>"]
+    if scenes:
+        parts += ["", "## 切對話帳本（台詞與旁白只能從這裡逐字照抄，順序照帳本；〔pN〕是原著段落號）",
+                  scenes_ledger(scenes)]
     task = ["", "---", "## 本頁任務", _plan_page_text(plan_page, shapes), ""]
     if prev_script.strip():
         task += ["上一頁的劇本（接續它，不要重複）：", prev_script.strip(), ""]
     task += ["請寫第 %s 頁的劇本。標題行請寫成：## 第 %s 頁（模板 %s：%s）" % (plan_page["page"], plan_page["page"], plan_page["template"], tpl_name)]
-    return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "\n".join(parts + task)}]
+    return [{"role": "system", "content": system(_look(project))}, {"role": "user", "content": "\n".join(parts + task)}]
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +422,7 @@ def storyboard_messages(project, script_page, page_no, template_key, pages_data,
     if prev_scenes.strip():
         task += ["上一頁的畫面摘要（場景與角色位置要接得上）：", prev_scenes.strip(), ""]
     task += ["本頁劇本：", "```", script_page.strip(), "```", "", "請輸出本頁的分鏡 JSON（只有 {\"panels\": [...]}，共 %d 格）。" % len(tpl["panels"])]
-    return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "\n".join(parts + task)}]
+    return [{"role": "system", "content": system(_look(project))}, {"role": "user", "content": "\n".join(parts + task)}]
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 
-from . import layout
+from . import layout, styles
 
 SHOT = {
     "extreme_wide": "extreme wide establishing shot",
@@ -74,7 +74,7 @@ def side_of_frame(box):
 
 
 def _subject(card):
-    """從 look_en 判斷用 She／He／This character（S1 實測：多角色時要寫明左右）。"""
+    """從 look_en 判斷用 She／He／This character（S1 實測：多角色時要寫明左右，見 docs/qa/S1_出圖實測.md）。"""
     words = set(re.findall(r"[a-z]+", str(card.get("look_en", "")).lower()))
     if words & {"woman", "girl", "female", "lady"}:
         return "She"
@@ -177,7 +177,7 @@ def compile_panel(project, page, panel, template_box, settings):
                           "bbox": layout.to_moss_bbox(obj["box"], width, height)})
         if settings.get("sfx_mode") == "moss":
             for sfx in panel.get("sfx") or []:
-                items.append({"label": "text", "caption": "Bold hand-drawn manga sound effect lettering in black ink.",
+                items.append({"label": "text", "caption": settings.get("sfx") or styles.resolve()["sfx"],
                               "text": sfx["text"], "bbox": layout.to_moss_bbox(sfx["box"], width, height)})
         for bubble in panel.get("bubbles") or []:
             bubble_error(project, bubble, seen)
@@ -203,12 +203,14 @@ def compile_panel(project, page, panel, template_box, settings):
 
 def compile_chapter(project, storyboard, pages_data=None, only_page=None, overrides=None):
     """整章（或 only_page 指定的那一頁）→ 生圖工作清單。"""
-    pages_data = pages_data or layout.load_pages()
+    pages_data = pages_data or project.pages()
     cfg = project.config
+    look = styles.resolve(cfg)          # 畫風預設集（N5）：style／meta／sfx 由 project.yaml 的 style_preset 決定
     settings = {
         "page": pages_data["page"],
-        "style": cfg.get("style", ""),
-        "meta": cfg.get("meta", ["manga panel", "black and white"]),
+        "style": look["style"],
+        "meta": look["meta"],
+        "sfx": look["sfx"],
         "megapixels": cfg.get("megapixels", 1.0),
         "negative": cfg.get("negative", ""),
         "sfx_mode": cfg.get("sfx_mode", "overlay"),
@@ -219,7 +221,7 @@ def compile_chapter(project, storyboard, pages_data=None, only_page=None, overri
     if settings["sfx_mode"] not in SFX_MODES:
         raise CompileError("sfx_mode 只能是 %s" % "、".join(sorted(SFX_MODES)))
     if not str(settings["style"]).strip():
-        raise CompileError("project.yaml 缺少 style（整部作品共用的畫風描述）")
+        raise CompileError("project.yaml 缺少 style（整部作品共用的畫風描述）；畫風預設集「%s」也沒有 style" % look["preset"])
 
     jobs = []
     for page in storyboard.get("pages") or []:

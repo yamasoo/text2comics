@@ -19,6 +19,8 @@ Desktop.ini
 
 # 本機設定（含路徑、模型名稱）
 config.json
+config.json.bak
+config.json.tmp
 secrets.json
 
 # 漫畫專案的產出（任何位置）

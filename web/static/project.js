@@ -1,7 +1,28 @@
-// 專案頁（#/）：開啟、新建、從範例複製；目前專案的章節表、視覺聖經摘要、環境檢查。
+// 專案頁（#/）：開啟、新建、從範例複製；目前專案的章節表、畫風、整本匯入、視覺聖經摘要、環境檢查。
 (function () {
   "use strict";
   const { h, PAGES } = FE;
+
+  /* ──────────────── 畫風預設集（GET /api/styles） ──────────────── */
+
+  // 新建、專案頁、換畫風三個入口共用一份；頁面層級的變數，重新載入頁面才會重抓。
+  let stylesCache = null;
+  function loadStyles(ctx) {
+    if (!stylesCache) {
+      stylesCache = T2C.get("/api/styles", {}, ctx)
+        .then((data) => ({ presets: ((data && data.presets) || []).filter((p) => p && p.name),
+                           fallback: (data && data.default) || "" }))
+        .catch((error) => { stylesCache = null; throw error; });
+    }
+    return stylesCache;
+  }
+
+  const styleOptions = (presets) => presets.map((p) => h("option", { value: p.name }, `${p.label}（${p.name}）`));
+
+  function styleLabel(presets, name) {
+    const found = presets.find((p) => p.name === name);
+    return found ? found.label : String(name || "－");
+  }
 
   function stageCell(value, unit) {
     return value === null || value === undefined ? h("span", { class: "muted" }, "－") : `${value}${unit || ""}`;
@@ -45,10 +66,19 @@
   function createForm(ctx, refresh) {
     const path = h("input", { type: "text", class: "grow", placeholder: "新資料夾的完整路徑，例如 E:\\comics\\屋頂的便當" });
     const title = h("input", { type: "text", placeholder: "作品名" });
-    const style = h("textarea", { rows: 2, placeholder: "畫風（英文，可留空用預設：黑白日式漫畫、網點、高對比）" });
+    const preset = h("select", { "aria-label": "畫風" }, h("option", { value: "" }, "畫風清單載入中…"));
+    const style = h("textarea", { rows: 2, placeholder: "英文的自由畫風描述；填了會蓋掉預設集的那一欄，留空就用預設集" });
     const mode = { blank: h("input", { type: "radio", name: "t2c-new", checked: true }), sample: h("input", { type: "radio", name: "t2c-new" }) };
     const renders = h("input", { type: "checkbox" });
     const rendersNote = h("span", { class: "muted t2c-small" });
+    loadStyles(ctx).then((loaded) => {
+      if (!loaded.presets.length) { preset.replaceChildren(h("option", { value: "" }, "沒有可用的畫風預設集，會用預設值")); return; }
+      preset.replaceChildren(...styleOptions(loaded.presets));
+      preset.value = loaded.presets.some((p) => p.name === loaded.fallback) ? loaded.fallback : loaded.presets[0].name;
+    }).catch((error) => {
+      if (error.name === "AbortError") return;
+      preset.replaceChildren(h("option", { value: "" }, "讀不到畫風清單，會用預設值"));
+    });
     FE.api("/api/info", { signal: ctx.signal }).then((info) => {           // 範例的出圖不進版控，新下載的工具沒有
       if (info && info.sample_renders === false) {
         renders.checked = false;
@@ -61,11 +91,14 @@
       if (dir) path.value = dir.replace(/[\\/]+$/, "") + (dir.includes("/") && !dir.includes("\\") ? "/" : "\\") + (title.value.trim() || "新作品");
     };
     const create = async () => {
+      const body = {
+        path: path.value.trim(), title: title.value.trim(), style_preset: preset.value || "",
+        from_sample: mode.sample.checked, sample_renders: renders.checked,
+      };
+      const custom = style.value.trim();
+      if (custom) body.style = custom;                                     // 有填才送；留空就把 style 那一欄交給預設集
       try {
-        const data = await FE.api("/api/project/create", {
-          body: { path: path.value.trim(), title: title.value.trim(), style: style.value.trim(), from_sample: mode.sample.checked, sample_renders: renders.checked },
-          signal: ctx.signal,
-        });
+        const data = await FE.api("/api/project/create", { body, signal: ctx.signal });
         T2C.setProject(data.root);
         FE.toast(`已建立：${data.root}`, "ok");
         refresh();
@@ -79,15 +112,232 @@
           h("label", { class: "check" }, mode.sample, "複製範例「屋頂的便當」（一章、兩個角色，用來試流程）"),
           h("label", { class: "check" }, renders, "連同範例的出圖（沒有 GPU 也能走完一章）", rendersNote)),
         h("label", { class: "field" }, "作品名", title),
-        h("label", { class: "field" }, "畫風", style),
+        h("label", { class: "field" }, "畫風", preset),
+        h("details", { class: "t2c-tight" },
+          h("summary", { class: "muted t2c-small" }, "自訂畫風（進階）"),
+          h("label", { class: "field" }, "自訂畫風字串（英文）", style)),
         h("div", { class: "row" }, h("button", { class: "btn btn-primary", type: "button", onclick: create }, "建立"))));
+  }
+
+  /* ──────────────── 專案頁的畫風（POST /api/project/style） ──────────────── */
+
+  function styleCard(ctx, data) {
+    const cfg = data.config || {};
+    const preset = h("select", { "aria-label": "換這部作品的畫風預設集" }, h("option", { value: "" }, "載入中…"));
+    const current = h("b", {}, "－");
+    const note = h("div", { class: "alert alert-warn", hidden: true });
+    const custom = cfg.style
+      ? h("span", { class: "muted t2c-small" }, "（project.yaml 另有明寫的 style，會蓋掉預設集的那一欄；換一次畫風就清掉）")
+      : null;
+    let presets = [];
+    let fallback = "mono";
+    let value = cfg.style_preset || "";
+
+    const show = (name) => {
+      const key = name || fallback;
+      current.textContent = `${styleLabel(presets, key)}（${key}）`;
+    };
+
+    loadStyles(ctx).then((loaded) => {
+      presets = loaded.presets;
+      fallback = loaded.fallback || fallback;
+      preset.replaceChildren(...(presets.length ? styleOptions(presets) : [h("option", { value: "" }, "沒有可用的畫風預設集")]));
+      preset.value = presets.some((p) => p.name === value) ? value : (presets.length ? fallback : "");
+      show(value);
+    }).catch((error) => {
+      if (error.name === "AbortError") return;
+      preset.replaceChildren(h("option", { value: "" }, "讀不到畫風清單"));
+      show(value);
+    });
+
+    const apply = async () => {
+      const chosen = preset.value;
+      if (!chosen || chosen === value) return;
+      preset.disabled = true;
+      try {
+        const reply = await T2C.post("/api/project/style", { preset: chosen }, ctx);
+        value = reply.preset || chosen;
+        if (!presets.some((p) => p.name === value)) {                      // 快取比後端舊：補上這一組，顯示才不會只剩名稱
+          presets = presets.concat([{ name: value, label: (reply.resolved && reply.resolved.name) || value }]);
+          preset.replaceChildren(...styleOptions(presets));
+        }
+        preset.value = value;
+        show(value);
+        FE.toast(`畫風已改成 ${styleLabel(presets, value)}（${value}）`, "ok");
+        const dropped = Array.isArray(reply.dropped) ? reply.dropped : [];
+        if (dropped.length) {
+          note.textContent = `已拿掉 project.yaml 裡明寫的 ${dropped.join("／")}，不然會蓋掉預設集。`;
+          note.hidden = false;
+        } else {
+          note.hidden = true;
+        }
+      } catch (error) {
+        FE.fail(error);
+        preset.value = value;
+      } finally { preset.disabled = false; }
+    };
+    preset.addEventListener("change", apply);
+
+    return h("section", { class: "card stack" },
+      h("div", { class: "row" }, h("h2", { class: "card-title grow" }, "畫風"), preset),
+      h("p", {}, "畫風：", current, custom),
+      note,
+      h("p", { class: "muted t2c-small" }, "畫風改了要在分鏡／編劇本之前改；已畫好的圖不會重畫。"));
+  }
+
+  /* ──────────────── 匯入整本切章（/api/import/plan → /api/import/commit） ──────────────── */
+
+  function importDialog(ctx, refresh) {
+    const file = h("input", { type: "text", class: "grow", spellcheck: "false", placeholder: "小說檔的完整路徑（.txt／.md／.docx）" });
+    const mode = h("select", { "aria-label": "切章方式" },
+      h("option", { value: "auto" }, "自動判斷"),
+      h("option", { value: "chapter" }, "第 N 章標題"),
+      h("option", { value: "markdown" }, "Markdown 的 ＃ 標題"));
+    const numbering = h("select", { "aria-label": "章號編號" },
+      h("option", { value: "auto" }, "自動（標題有章號就用標題的）"),
+      h("option", { value: "titles" }, "照標題的章號"),
+      h("option", { value: "sequential" }, "從第 1 章連續編號"));
+    const conflict = h("select", { "aria-label": "重複匯入" },
+      h("option", { value: "skip" }, "跳過（專案裡已經有的章不動）"),
+      h("option", { value: "overwrite" }, "覆蓋（先備份舊檔）"));
+    const convert = h("input", { type: "checkbox" });
+    const preface = h("input", { type: "checkbox" });
+    const out = h("div", { class: "stack" }, h("p", { class: "muted" }, "按「預覽」只切章、不寫檔；表格確認過再按「匯入」。"));
+
+    let planned = null;      // 預覽成功的結果；換了任何選項就作廢
+    let imported = false;    // 匯入成功：關掉對話框後要刷新頁面
+
+    const previewBtn = h("button", { class: "btn", type: "button" }, "預覽");
+    const commitBtn = h("button", { class: "btn btn-primary", type: "button", disabled: true }, "匯入");
+    let cancelBtn = null;
+
+    const options = () => ({
+      path: file.value.trim(), mode: mode.value, numbering: numbering.value,
+      convert: convert.checked, preface_as_chapter: preface.checked,
+    });
+    const invalidate = () => {
+      planned = null;
+      commitBtn.disabled = true;
+      out.replaceChildren(h("p", { class: "muted" }, "選項改了，請重新按「預覽」。"));
+    };
+    const browse = async () => {
+      const picked = await FE.filepicker.open({ mode: "file", exts: [".txt", ".md", ".docx"], title: "選擇小說檔" });
+      if (!picked) return;
+      file.value = picked;
+      invalidate();
+    };
+    [file, mode, numbering, convert, preface].forEach((el) => {
+      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", invalidate);
+    });
+
+    const warningsOf = (list) => (Array.isArray(list) ? list : []).map((w) => ({ level: "warn", message: String(w) }));
+
+    function previewTable(reply) {
+      const chapters = Array.isArray(reply.chapters) ? reply.chapters : [];
+      const total = chapters.reduce((sum, c) => sum + (Number(c.chars) || 0), 0);
+      const heads = Array.isArray(reply.preface) ? reply.preface : [];
+      return h("div", { class: "stack" },
+        h("p", {}, `共 ${chapters.length} 章、合計 ${total} 字${reply.numbered_by_title ? "（章號照標題上的號碼）" : ""}。`),
+        chapters.length
+          ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+              h("thead", {}, h("tr", {}, ["章號", "章名", "字數", "旗標"].map((t) => h("th", {}, t)))),
+              h("tbody", {}, chapters.map((c) => h("tr", {},
+                h("td", { class: "num" }, c.no),
+                h("td", {}, c.title || h("span", { class: "muted" }, "（沒有章名）"),
+                  c.head ? h("div", { class: "muted t2c-small" }, c.head) : null),
+                h("td", { class: "num" }, Number(c.chars) || 0),
+                h("td", {}, (Array.isArray(c.flags) && c.flags.length)
+                  ? c.flags.map((f) => T2C.chip(f, "warn"))
+                  : h("span", { class: "muted" }, "－")))))))
+          : h("div", { class: "alert alert-warn" }, "這個檔案切不出章節。換一個「切章方式」再預覽，或確認檔案是 UTF-8 的全文。"),
+        heads.length
+          ? h("p", { class: "muted t2c-small" },
+              `開頭有 ${heads.length} 段文字（合計 ${heads.reduce((n, p) => n + (Number(p.chars) || 0), 0)} 字：${heads.map((p) => p.name).join("、")}），預設不會匯入；要的話勾「把開頭的文字當成一章」。`)
+          : null,
+        T2C.issues(warningsOf(reply.warnings), { title: "提醒" }));
+    }
+
+    function summary(reply) {
+      const written = Array.isArray(reply.written) ? reply.written : [];
+      const skipped = Array.isArray(reply.skipped) ? reply.skipped : [];
+      const replaced = Array.isArray(reply.replaced) ? reply.replaced : [];
+      return h("div", { class: "stack" },
+        h("div", { class: "alert alert-ok" },
+          `寫入 ${written.length} 章（${reply.chars || 0} 字）、跳過 ${skipped.length} 章、覆蓋 ${replaced.length} 章。`),
+        skipped.length ? h("p", { class: "muted t2c-small" }, `跳過的章號：${skipped.join("、")}（專案裡已經有了；要換掉請把「重複匯入」改成覆蓋）`) : null,
+        replaced.length ? h("p", { class: "muted t2c-small" }, `覆蓋並備份的章號：${replaced.join("、")}`) : null,
+        T2C.issues(warningsOf(reply.warnings), { title: "提醒" }));
+    }
+
+    async function preview() {
+      if (!file.value.trim()) { FE.toast("請先選或貼上小說檔的路徑", "warn"); return; }
+      planned = null;
+      commitBtn.disabled = true;
+      previewBtn.disabled = true;
+      out.replaceChildren(h("p", { class: "muted" }, "切章中…"));
+      try {
+        const reply = await T2C.post("/api/import/plan", options(), ctx);
+        planned = reply;
+        out.replaceChildren(previewTable(reply));
+        commitBtn.disabled = !(Array.isArray(reply.chapters) && reply.chapters.length);
+      } catch (error) {
+        if (error.name === "AbortError") return;
+        out.replaceChildren(h("div", { class: "alert alert-err" }, error.message || String(error)));
+      }
+      previewBtn.disabled = false;
+    }
+
+    async function commit() {
+      if (!planned) return;
+      commitBtn.disabled = true;
+      previewBtn.disabled = true;
+      out.replaceChildren(h("p", { class: "muted" }, "寫入 source/…"));
+      try {
+        const reply = await T2C.post("/api/import/commit", Object.assign(options(), { conflict: conflict.value }), ctx);
+        imported = true;
+        out.replaceChildren(summary(reply));
+        if (cancelBtn) cancelBtn.textContent = "完成";
+        FE.toast(`已匯入 ${(Array.isArray(reply.written) ? reply.written : []).length} 章`, "ok");
+      } catch (error) {
+        if (error.name === "AbortError") return;
+        out.replaceChildren(h("div", { class: "alert alert-err" }, error.message || String(error)));
+        commitBtn.disabled = false;
+        previewBtn.disabled = false;
+      }
+    }
+
+    previewBtn.addEventListener("click", preview);
+    commitBtn.addEventListener("click", commit);
+
+    const close = FE.modal({
+      title: "匯入整本切章",
+      wide: true,
+      body: h("div", { class: "stack" },
+        h("p", { class: "muted" }, "把整本小說切成章、寫進這個專案的 source/chNNN.txt。先預覽再匯入；覆蓋時舊檔會先備份。"),
+        h("div", { class: "row" }, file, h("button", { class: "btn", type: "button", onclick: browse }, "瀏覽…")),
+        h("div", { class: "row" },
+          h("label", { class: "row t2c-inline" }, "切章方式", mode),
+          h("label", { class: "row t2c-inline" }, "章號編號", numbering),
+          h("label", { class: "row t2c-inline" }, "重複匯入", conflict)),
+        h("div", { class: "stack t2c-tight" },
+          h("label", { class: "check" }, convert, "簡轉繁（轉成台灣繁體）",
+            h("span", { class: "muted t2c-small" }, "（沒裝 opencc 時會跳過，並寫在提醒裡）")),
+          h("label", { class: "check" }, preface, "把開頭的文字當成一章（書名、簡介、楔子）")),
+        out),
+      foot: (done) => {
+        cancelBtn = h("button", { class: "btn", type: "button", onclick: () => done(false) }, "取消");
+        return [cancelBtn, previewBtn, commitBtn];
+      },
+    });
+    close.closed.then(() => { if (imported) refresh(); });
+    return close;
   }
 
   function envCard(ctx) {
     const box = h("div", { class: "stack" }, h("p", { class: "muted" }, "檢查中…"));
     const load = async () => {
       try {
-        const env = await FE.api("/api/env", { signal: ctx.signal });
+        const env = await T2C.get("/api/env", {}, ctx);
         box.replaceChildren(
           h("div", { class: "row" }, T2C.chip(env.comfy.ok ? "ComfyUI 已連線" : "ComfyUI 沒有回應", env.comfy.ok ? "ok" : "warn"),
             h("span", { class: "muted" }, env.comfy.url), env.comfy.vram ? h("span", {}, env.comfy.vram) : null),
@@ -116,7 +366,7 @@
     FE.go(FE.hash("chapter", next, { tab: "source" }));
   }
 
-  async function projectView(ctx) {
+  async function projectView(ctx, refresh) {
     let data;
     try {
       data = await FE.api("/api/project", { query: { project: T2C.project() }, signal: ctx.signal });
@@ -139,12 +389,14 @@
     return h("div", { class: "stack" },
       h("section", { class: "card stack" },
         h("div", { class: "row" }, h("h2", { class: "card-title grow" }, `《${data.title}》`),
+          h("button", { class: "btn", type: "button", onclick: () => importDialog(ctx, refresh) }, "匯入整本切章…"),
           h("button", { class: "btn btn-primary", type: "button", onclick: () => addChapter(data.chapters) }, "新增一章")),
         h("p", { class: "muted t2c-small" }, data.root),
         data.chapters.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
           h("thead", {}, h("tr", {}, ["章", "標題", "原著", "規劃", "劇本", "分鏡", "已出圖", "已選圖", "頁面"].map((t) => h("th", {}, t)))),
           h("tbody", {}, rows)))
-          : h("div", { class: "empty" }, "還沒有章節。按「新增一章」貼上第一章的原著。")),
+          : h("div", { class: "empty" }, "還沒有章節。按「新增一章」貼上第一章的原著，或按「匯入整本切章…」一次切完整本。")),
+      styleCard(ctx, data),
       h("section", { class: "card stack" },
         h("div", { class: "row" }, h("h2", { class: "card-title grow" }, "視覺聖經"), h("a", { class: "btn btn-sm", href: "#/bible" }, "開啟")),
         h("p", {}, `角色 ${b.characters.length}：${b.characters.map((c) => c.name).join("、") || "無"}`),
@@ -155,7 +407,7 @@
   PAGES.home = async (ctx) => {
     ctx.crumbs([{ label: "專案" }]);
     const refresh = () => FE.route();
-    const main = T2C.project() ? await projectView(ctx) : h("div", { class: "empty" }, "開啟一個漫畫專案資料夾，或新建一個。第一次用可以選「複製範例」。");
+    const main = T2C.project() ? await projectView(ctx, refresh) : h("div", { class: "empty" }, "開啟一個漫畫專案資料夾，或新建一個。第一次用可以選「複製範例」。");
     ctx.view(h("div", { class: "stack t2c-page" },
       h("h1", { class: "t2c-title" }, "文字轉漫畫"),
       h("p", { class: "muted" }, "小說一章 → 改編規劃 → 漫畫劇本 → 分鏡 → MOSS-Image 逐格出圖 → 挑圖 → 嵌字 → 頁面。"),

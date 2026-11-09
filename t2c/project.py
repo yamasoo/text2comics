@@ -6,13 +6,20 @@
     bible/locations/*.md       地點：同上（id、look_en）
     script/chNNN.md            漫畫劇本（人看、人改）
     storyboard/chNNN.json      分鏡（機器讀；格式見 docs/02_資料格式.md）
+    pages.json                 選填：這一部作品自己的版型（project.yaml 的 layout 指到它）
     build/、renders/、pages/   產出（不進版控）
+
+版型（N4）：預設用套件內建的 t2c/data/pages.json；project.yaml 寫 layout: {file, mode} 就能
+疊加（mode: merge，預設）或整份取代（mode: replace）模板。出圖 profile（N4）用 comfy_profile 指定
+config.json 的 comfy.profiles 其中一組。
 """
 import json
 import re
 from pathlib import Path
 
 import yaml
+
+from . import layout
 
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.S)
 ID_RE = re.compile(r"^[a-z0-9_-]+$")
@@ -60,8 +67,40 @@ class Project:
         if not cfg.is_file():
             raise ProjectError("%s 不是漫畫專案資料夾（找不到 project.yaml）" % self.root)
         self.config = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+        if not isinstance(self.config, dict):
+            raise ProjectError("%s 要是 key: value 的形式" % cfg)
         self.characters = _load_cards(self.root / "bible" / "characters", "角色")
         self.locations = _load_cards(self.root / "bible" / "locations", "地點")
+        self._pages = None
+        self._layout_info = None
+
+    # --- 版型與出圖 profile（N4）---------------------------------------------
+    def pages(self):
+        """這一部作品用的版型：內建的 + project.yaml 的 layout 指定的外部檔（merge 疊加／replace 覆寫）。
+        讀一次就快取；錯誤訊息會寫出是哪個檔案、哪個模板、第幾格。"""
+        if self._pages is None:
+            info = {}
+            try:
+                pages = layout.load_project_pages(self, info)
+            except layout.LayoutError as error:
+                raise ProjectError(str(error))
+            self._layout_info, self._pages = info, pages
+        return self._pages
+
+    def layout_info(self):
+        """專案的版型檔設定：{"file": 路徑或 "", "mode": "merge"／"replace" 或 "", "templates": [專案檔的模板]}。"""
+        if self._layout_info is None:
+            self.pages()
+        return self._layout_info
+
+    def comfy_profile(self):
+        """project.yaml 的 comfy_profile：用 config.json 的 comfy.profiles 哪一組出圖；沒寫回傳 None。"""
+        value = self.config.get("comfy_profile")
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ProjectError("project.yaml 的 comfy_profile 要是 config.json 裡 comfy.profiles 的名稱（字串）：%r" % (value,))
+        return value.strip()
 
     def storyboard_path(self, chapter):
         return self.root / "storyboard" / ("ch%03d.json" % int(chapter))
@@ -94,6 +133,19 @@ class Project:
 
     def plan_path(self, chapter):
         return self.root / "plan" / ("ch%03d.json" % int(chapter))
+
+    def scenes_path(self, chapter):
+        """切對話（N3）：場 → 旁白／對話／演出，每一句帶 source_para 回指原著段落。"""
+        return self.root / "scenes" / ("ch%03d.json" % int(chapter))
+
+    def load_scenes(self, chapter):
+        path = self.scenes_path(chapter)
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ProjectError("%s 不是合法的 JSON：%s" % (path, error))
 
     def script_path(self, chapter):
         return self.root / "script" / ("ch%03d.md" % int(chapter))

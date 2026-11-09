@@ -82,7 +82,7 @@ def test_workflow_path_rules(tmp_path):
     mine.write_text("{}", encoding="utf-8")
     cfg = {"comfy": {"workflow": "wf/mine.json"}, "_path": str(tmp_path / "config.json")}
     assert comfy.workflow_path(cfg) == mine                                                         # 相對於 config.json
-    with pytest.raises(comfy.ComfyError, match="找不到 workflow"):
+    with pytest.raises(comfy.ComfyError, match="找不到 profile「moss」的 workflow"):
         comfy.workflow_path({"comfy": {"workflow": "nope.json"}, "_path": str(tmp_path / "config.json")})
 
 

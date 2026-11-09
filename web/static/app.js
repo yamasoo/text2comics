@@ -17,6 +17,7 @@
       { label: `第 ${n} 章`, href: FE.hash("chapter", n), page: "chapter/:n" },
       { label: "視覺聖經", href: "#/bible", page: "bible" },
       { label: "嵌字", href: "#/letter", page: "letter" },
+      { label: "設定", href: "#/settings", page: "settings" },
     ];
   }
 

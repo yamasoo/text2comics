@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fekit import ApiError, JobRunner
 
-from t2c import bible, comfy, compose, export, letter, llm, settings, workspace
+from t2c import bible, comfy, compose, export, importer, layout, letter, llm, settings, styles, workspace
 from t2c.adapt import AdaptError
 from t2c.compile import CompileError
 from t2c.project import ProjectError
@@ -17,7 +17,8 @@ SAMPLE = ROOT / "examples" / "sample_comic"
 runner = JobRunner(queue=True)
 
 CORE_ERRORS = (workspace.WorkspaceError, ProjectError, CompileError, compose.ComposeError, bible.BibleError,
-               letter.LetterError, RenderError, AdaptError, llm.LLMError, comfy.ComfyError, export.ExportError)
+               letter.LetterError, RenderError, AdaptError, llm.LLMError, comfy.ComfyError, export.ExportError,
+               layout.LayoutError, styles.StylesError, importer.ImporterError)
 
 
 @contextmanager

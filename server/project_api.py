@@ -2,6 +2,7 @@
 import threading
 from collections import OrderedDict
 from io import BytesIO
+from pathlib import Path
 
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import FileResponse, Response
@@ -9,7 +10,7 @@ from PIL import Image
 
 from fekit import ApiError
 
-from t2c import compose, export, gpu, layout, llm, workspace
+from t2c import comfy, compose, export, gpu, importer, layout, llm, styles, workspace
 
 from .common import SAMPLE, body_project, chapter, config, guard
 from .common import project as open_project
@@ -38,15 +39,81 @@ def _open(path):
 
 @router.post("/api/project/create")
 def project_create(body: dict = Body(...)):
+    """新建專案。style_preset 是畫風預設集（mono／color／american）；style 是舊的自訂畫風字串。"""
+    params = {}
+    if str(body.get("style_preset") or "").strip():
+        params["preset"] = str(body["style_preset"]).strip()
     with guard("create_failed"):
         proj = workspace.create_project(body.get("path"), str(body.get("title") or ""), str(body.get("style") or ""),
-                                        sample=SAMPLE if body.get("from_sample") else None, sample_renders=bool(body.get("sample_renders")))
+                                        sample=SAMPLE if body.get("from_sample") else None,
+                                        sample_renders=bool(body.get("sample_renders")), **params)
         return {"root": str(proj.root), "overview": workspace.overview(proj)}
 
 
+@router.get("/api/styles")
+def style_presets():
+    """畫風預設集清單（畫風只有 t2c/data/styles.json 這一份來源）。"""
+    with guard("no_styles"):
+        return {"presets": [{"name": name, "label": styles.preset(name)["name"]} for name in styles.names()],
+                "default": styles.default_name()}
+
+
+@router.post("/api/project/style")
+def project_style(body: dict = Body(...)):
+    """換這部作品的畫風：改 project.yaml 的 style_preset，並拿掉明寫的 style／meta（會蓋掉預設集）。"""
+    proj = body_project(body)
+    with guard("style_failed"):
+        result = workspace.set_style_preset(proj, body.get("preset"))
+    proj = _open(str(proj.root))
+    with guard():
+        resolved = styles.resolve(proj.config)
+        return {"path": result["path"], "preset": resolved["preset"], "dropped": result["dropped"],
+                "resolved": {"name": resolved["name"], "style": resolved["style"], "meta": resolved["meta"]},
+                "overview": workspace.overview(proj)}
+
+
+# ---- 整本匯入切章（N2 的核心，介面入口在 N7） ----------------------------------------
+
+def _import_paths(body):
+    raw = body.get("paths") if isinstance(body.get("paths"), list) else [body.get("path")]
+    paths = [Path(str(p)) for p in raw if str(p or "").strip()]
+    if not paths:
+        raise ApiError(400, "請先選要匯入的檔案（.txt／.md／.docx）", "bad_path")
+    return paths
+
+
+_IMPORT_OPTIONS = ("mode", "lang", "numbering", "start", "preface_as_chapter", "preface_title", "convert", "conflict")
+
+
+def _import_opts(body):
+    return {key: body[key] for key in _IMPORT_OPTIONS if key in body and body[key] not in (None, "")}
+
+
+@router.post("/api/import/plan")
+def import_plan(body: dict = Body(...)):
+    """整本匯入：先切章預覽，不寫任何檔案。"""
+    with guard("import_failed"):
+        return importer.preview(_import_paths(body), _import_opts(body))
+
+
+@router.post("/api/import/commit")
+def import_commit(body: dict = Body(...)):
+    """整本匯入：寫進專案的 source/chNNN.txt（conflict＝skip／overwrite，覆寫前會備份）。"""
+    proj = body_project(body)
+    with guard("import_failed"):
+        result = importer.commit(proj, _import_paths(body), _import_opts(body))
+    result["overview"] = workspace.overview(_open(str(proj.root)))
+    return result
+
+
 @router.get("/api/env")
-def env():
-    """環境檢查：ComfyUI、各 provider 的金鑰與本機伺服器、出圖預設、字型。"""
+def env(project: str = "", profile: str = ""):
+    """環境檢查：ComfyUI、各 provider 的金鑰與本機伺服器、出圖預設、字型。
+
+    presets／default_preset 跟著「這一章的 profile」（project.yaml 的 comfy_profile →
+    config.json 的 default_profile）；沒有 comfy.profiles 的舊設定才用頂層的 presets。
+    專案路徑壞掉時當成沒開專案（設定頁與環境檢查不該因此打不開）。
+    """
     cfg = config()
     comfy_cfg = cfg.get("comfy") or {}
     stats = gpu.comfy_stats(comfy_cfg.get("url") or "http://127.0.0.1:8188")
@@ -64,16 +131,91 @@ def env():
                           "has_key": bool(llm.api_key(prov)) if prov.get("key_env") else True,
                           "key_env": prov.get("key_env") or "",
                           "running": gpu.llm_running(prov, 1.0) if local else None})
-    table, default = _presets(cfg)
-    return {"config_path": cfg.get("_path", ""),
-            "comfy": {"url": comfy_cfg.get("url", ""), "ok": stats is not None, "vram": gpu.vram_summary(stats)},
+    prof = _chapter_profile(cfg, _maybe_project(project))
+    if str(profile or "").strip():                 # 介面換 profile 時，presets 也要跟著換
+        try:
+            prof = comfy.resolve_profile(cfg, name=profile)
+        except comfy.ComfyError as error:
+            raise ApiError(400, str(error), "bad_profile")
+    table, default = _presets(cfg, prof)
+    comfy_block = {"url": comfy_cfg.get("url", ""), "ok": stats is not None, "vram": gpu.vram_summary(stats),
+                   "profiles": _profile_info(cfg), "default_profile": _default_profile(cfg),
+                   "profile": (prof or {}).get("name", ""), "kind": (prof or {}).get("kind", ""),
+                   "unet": ((prof or {}).get("models") or {}).get("unet", "")}
+    return {"config_path": cfg.get("_path", ""), "comfy": comfy_block,
             "providers": providers, "stages": stages, "presets": table, "default_preset": default}
 
 
-def _presets(cfg):
-    comfy_cfg = cfg.get("comfy") or {}
-    table = [k for k in (comfy_cfg.get("presets") or {}) if not k.startswith("_")]
-    return table, comfy_cfg.get("default_preset") or (table[0] if table else "")
+def _maybe_project(path):
+    """沒開專案、或路徑壞掉就回 None（當成使用 config.json 的 default_profile）。"""
+    if not str(path or "").strip():
+        return None
+    try:
+        return open_project(path)
+    except ApiError:
+        return None
+
+
+def _chapter_profile(cfg, proj):
+    """這一章要用哪一組 profile；設定壞掉回 None（呼叫端退回舊的頂層 presets）。"""
+    try:
+        return comfy.resolve_profile(cfg, project_config=(proj.config if proj is not None else None))
+    except comfy.ComfyError:
+        return None
+
+
+def _profile_info(cfg):
+    """出圖 profile 清單（含 kind 與 unet 檔名）：[{"name","kind","unet"}]。
+
+    沒有 comfy.profiles 的舊設定也回一組 moss，介面不用分兩種情況。
+    """
+    try:
+        names = list(comfy.profile_table(cfg)) or [comfy.LEGACY_PROFILE]
+    except comfy.ComfyError:
+        return []
+    rows = []
+    for name in names:
+        try:
+            prof = comfy.resolve_profile(cfg, name=name)
+        except comfy.ComfyError:
+            rows.append({"name": name, "kind": "", "unet": ""})
+            continue
+        rows.append({"name": name, "kind": prof["kind"], "unet": (prof.get("models") or {}).get("unet", "")})
+    return rows
+
+
+def _presets(cfg, profile=None):
+    """出圖預設的清單與預設名稱（來自 profile，N4）；設定壞掉時退回舊的頂層 presets，讓介面還開得起來。"""
+    try:
+        prof = profile if profile is not None else comfy.resolve_profile(cfg)
+        table = list(prof["presets"])
+        return table, prof["default_preset"] or (table[0] if table else "")
+    except comfy.ComfyError:
+        comfy_cfg = cfg.get("comfy") or {}
+        table = [k for k in (comfy_cfg.get("presets") or {}) if not k.startswith("_")]
+        return table, comfy_cfg.get("default_preset") or (table[0] if table else "")
+
+
+def _profile_names(cfg):
+    try:
+        return list(comfy.profile_table(cfg))
+    except comfy.ComfyError:
+        return []
+
+
+def _default_profile(cfg):
+    try:
+        return comfy.default_profile_name(cfg)
+    except comfy.ComfyError:
+        return ""
+
+
+def _project_profile(cfg, proj):
+    """這一章要用哪一組 profile（project.yaml 的 comfy_profile → config.json 的 default_profile）。"""
+    try:
+        return comfy.resolve_profile(cfg, project_config=proj.config)
+    except comfy.ComfyError as error:
+        raise ApiError(400, str(error), "bad_profile")
 
 
 # ---- 圖片 ------------------------------------------------------------------------
@@ -152,7 +294,7 @@ def plan_get(project: str = "", chapter_no: int = Query(1, alias="chapter")):
     proj, n = _open(project), chapter(chapter_no)
     with guard():
         data = workspace.read_plan(proj, n)
-    data["templates"] = {k: {"name": t.get("name", k), "panels": len(t["panels"])} for k, t in layout.load_pages()["templates"].items()}
+    data["templates"] = {k: {"name": t.get("name", k), "panels": len(t["panels"])} for k, t in proj.pages()["templates"].items()}
     return data
 
 
@@ -186,12 +328,16 @@ def script_save(body: dict = Body(...)):
 def _vocab(proj):
     """分鏡編輯器要的選單：角色（含服裝）、地點、模板、鏡頭、角度、對話框種類。"""
     from t2c.compile import ANGLE, BUBBLE_KINDS, SHOT
-    pages_data = layout.load_pages()
+    pages_data = proj.pages()
+    info = proj.layout_info()
+    from_project = set(info.get("templates") or [])
     return {
         "characters": [{"id": cid, "name": c.get("name", cid), "outfits": list((c.get("outfits") or {"default": ""}).keys())}
                        for cid, c in proj.characters.items()],
         "locations": [{"id": lid, "name": c.get("name", lid)} for lid, c in proj.locations.items()],
-        "templates": {k: {"name": t.get("name", k), "panels": t["panels"]} for k, t in pages_data["templates"].items()},
+        "templates": {k: {"name": t.get("name", k), "panels": t["panels"], "source": "project" if k in from_project else "builtin"}
+                      for k, t in pages_data["templates"].items()},
+        "layout": info,
         "page": {k: pages_data["page"][k] for k in ("width_mm", "height_mm")},
         "shots": list(SHOT), "angles": list(ANGLE),
         "bubble_kinds": ["speech", "thought", "shout", "whisper", "radio", "narration"] if BUBBLE_KINDS else [],
@@ -228,12 +374,27 @@ def panel_prompt(body: dict = Body(...)):
 # ---- 出圖與選圖 --------------------------------------------------------------------
 
 @router.get("/api/chapter/panels")
-def panels(project: str = "", chapter_no: int = Query(1, alias="chapter")):
+def panels(project: str = "", chapter_no: int = Query(1, alias="chapter"), profile: str = ""):
+    """出圖分頁的資料。profile 指定時，presets／default_preset 換成那一組的（介面臨時換 profile 用），
+    project_profile 仍然是這一章的預設（project.yaml 的 comfy_profile → config.json 的 default_profile）。"""
     proj, n = _open(project), chapter(chapter_no)
     with guard():
         data = workspace.panels_status(proj, n)
     cfg = config()
-    data["presets"], data["default_preset"] = _presets(cfg)
+    chapter_profile = _project_profile(cfg, proj)
+    viewed = chapter_profile
+    if str(profile or "").strip():
+        try:
+            viewed = comfy.resolve_profile(cfg, name=profile)
+        except comfy.ComfyError as error:
+            raise ApiError(400, str(error), "bad_profile")
+    data["presets"], data["default_preset"] = _presets(cfg, viewed)
+    data["profiles"] = _profile_names(cfg) or [viewed["name"]]
+    data["default_profile"] = _default_profile(cfg)
+    data["project_profile"] = chapter_profile["name"]
+    data["profile"] = viewed["name"]
+    data["kind"] = viewed["kind"]
+    data["profile_info"] = _profile_info(cfg)
     data["renders"] = "renders/%s" % compose.chapter_name(n)
     return data
 
@@ -280,8 +441,8 @@ def pages(project: str = "", chapter_no: int = Query(1, alias="chapter")):
         rows.append({"page": int(page["page"]), "template": page.get("template"), "panels": len(page.get("panels") or []),
                      "png": "pages/%s/%s" % (compose.chapter_name(n), png.name) if png.is_file() else "",
                      "mtime": png.stat().st_mtime if png.is_file() else 0})
-    size = layout.page_size(layout.load_pages()["page"])
-    return {"pages": rows, "size": list(size), "export": _export_status(proj, n)}
+    size = layout.page_size(proj.pages()["page"])
+    return {"pages": rows, "size": list(size), "layout": proj.layout_info(), "export": _export_status(proj, n)}
 
 
 def _export_status(proj, n):

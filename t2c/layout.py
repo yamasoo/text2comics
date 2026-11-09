@@ -4,28 +4,155 @@
 - 分鏡裡的位置一律是「比例」[x0, y0, x1, y1]，左上 (0,0)、右下 (1,1)。給 LLM 與人寫的都是這個。
 - 只有送進 MOSS-Image 的那一刻才換成它的格式：像素、原點在畫布中心、順序 [y_min, x_min, y_max, x_max]
   （bbox_coord_space = "abs_centralized"、bbox_format = "yxyx"）。換算只在 to_moss_bbox() 做。
+
+版型（N4）：預設讀套件自帶的 t2c/data/pages.json；專案可以在 project.yaml 用 layout 指定外部版型檔，
+mode: merge（預設，疊加：同名的模板換掉、其他的留著）或 mode: replace（只用專案檔的模板）。
 """
 import json
 import math
+import re
 from pathlib import Path
 
 DATA = Path(__file__).resolve().parent / "data"      # 套件自帶的資料：整包搬走也讀得到（M1 修正 M-3）
 PAGES_FILE = DATA / "pages.json"
+BUILTIN_LABEL = "t2c/data/pages.json（內建）"
 
 MOSS_COORD_SPACE = "abs_centralized"
 MOSS_BBOX_FORMAT = "yxyx"
 
+TEMPLATE_KEY = re.compile(r"^[a-z0-9_-]+$")
+LAYOUT_MODES = {"merge": "疊加（同名的模板換掉，其他的留著）", "replace": "覆寫（只用專案檔的模板）"}
+
 
 class LayoutError(Exception):
-    """給人看的錯誤訊息。"""
+    """給人看的錯誤訊息（寫出是哪個檔案、哪個模板、第幾格）。"""
+
+
+def _number(value, label, positive=False):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise LayoutError("%s 要是數字：%r" % (label, value))
+    if number < 0 or (positive and number <= 0):
+        raise LayoutError("%s 要是%s：%r" % (label, "大於 0 的數字" if positive else "大於等於 0 的數字", value))
+    return number
+
+
+def _check_page(page, label):
+    """page 區塊的檢查：尺寸、頁邊、白邊。"""
+    if not isinstance(page, dict):
+        raise LayoutError("%s：page 要是物件（width_mm、height_mm、width_px…），目前是 %s" % (label, type(page).__name__))
+    for key in ("width_mm", "height_mm", "width_px"):
+        if key in page:
+            _number(page[key], "%s：page.%s" % (label, key), positive=True)
+    for key in ("gutter_px", "frame_px"):
+        if key in page:
+            _number(page[key], "%s：page.%s" % (label, key))
+    if "margin" in page:
+        margin = page["margin"]
+        if not isinstance(margin, (list, tuple)) or len(margin) != 4:
+            raise LayoutError("%s：page.margin 要是 [左, 上, 右, 下] 四個比例：%r" % (label, margin))
+        left, top, right, bottom = (_number(v, "%s：page.margin" % label) for v in margin)
+        if any(v >= 1 for v in (left, top, right, bottom)) or left + right >= 1 or top + bottom >= 1:
+            raise LayoutError("%s：page.margin 要是 0–1 的比例，左右、上下加起來要小於 1：%r" % (label, margin))
+
+
+def _check_templates(templates, label):
+    if not isinstance(templates, dict) or not templates:
+        raise LayoutError("%s 缺少 templates（至少要有一組模板；格式同 t2c/data/pages.json）" % label)
+    for key, tpl in templates.items():
+        if str(key).startswith("_"):
+            continue
+        if not TEMPLATE_KEY.match(str(key)):
+            raise LayoutError("%s：模板「%s」的名稱只能用 a-z、0-9、底線、連字號" % (label, key))
+        if not isinstance(tpl, dict):
+            raise LayoutError("%s：模板「%s」要是物件（name、panels）：目前是 %s" % (label, key, type(tpl).__name__))
+        if "name" in tpl and not isinstance(tpl["name"], str):
+            raise LayoutError("%s：模板「%s」的 name 要是字串：%r" % (label, key, tpl["name"]))
+        panels = tpl.get("panels")
+        if not isinstance(panels, list) or not panels:
+            raise LayoutError("%s：模板「%s」要有 panels（一串格子框，至少一個）" % (label, key))
+        for i, box in enumerate(panels, 1):
+            check_box(box, "%s：模板「%s」第 %d 格" % (label, key, i))
+
+
+def validate_pages(data, label=BUILTIN_LABEL):
+    """一份版型檔的檢查。回傳只留 page 與 templates 的 dict（_ 開頭的說明鍵不傳下去）。"""
+    if not isinstance(data, dict):
+        raise LayoutError("%s 最外層要是物件（{page, templates}）：目前是 %s" % (label, type(data).__name__))
+    page = data.get("page") or {}
+    _check_page(page, label)
+    templates = data.get("templates")
+    _check_templates(templates, label)
+    return {"page": dict(page), "templates": {k: v for k, v in templates.items() if not str(k).startswith("_")}}
 
 
 def load_pages(path=None):
-    data = json.loads(Path(path or PAGES_FILE).read_text(encoding="utf-8"))
-    for key, tpl in data["templates"].items():
-        for i, box in enumerate(tpl["panels"], 1):
-            check_box(box, "模板 %s 第 %d 格" % (key, i))
-    return data
+    """讀一份版型檔（沒給就是套件內建的）並檢查。錯誤訊息會寫出檔案與欄位。"""
+    path = Path(path or PAGES_FILE)
+    label = BUILTIN_LABEL if path.resolve() == PAGES_FILE.resolve() else str(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise LayoutError("找不到版型檔：%s" % path)
+    except OSError as error:
+        raise LayoutError("讀不到版型檔 %s：%s" % (path, error))
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise LayoutError("%s 不是合法的 JSON：第 %d 行第 %d 欄：%s" % (label, error.lineno, error.colno, error.msg))
+    return validate_pages(data, label)
+
+
+def merge_pages(base, overlay, label=BUILTIN_LABEL, mode="merge"):
+    """把 overlay 疊到 base 上：page 一層合併（overlay 有給的欄位才蓋掉）；merge 時模板同名換掉、
+    replace 時只用 overlay 的模板。回傳新的 dict（兩個來源都不會被改到）。"""
+    page = {**base["page"], **(overlay.get("page") or {})}
+    if mode == "replace":
+        templates = dict(overlay["templates"])
+    else:
+        templates = {**base["templates"], **overlay["templates"]}
+    return validate_pages({"page": page, "templates": templates}, label)
+
+
+def layout_spec(project):
+    """project.yaml 的 layout 設定 → (路徑, 模式, 說明文字)；沒有設定回傳 (None, None, "")。"""
+    spec = (getattr(project, "config", None) or {}).get("layout")
+    if not spec:
+        return None, None, ""
+    if isinstance(spec, str):
+        spec = {"file": spec}
+    if not isinstance(spec, dict):
+        raise LayoutError("project.yaml 的 layout 要是版型檔的路徑，或 {file, mode} 物件：%r" % (spec,))
+    name = str(spec.get("file") or "").strip()
+    if not name:
+        raise LayoutError("project.yaml 的 layout 少了 file（專案裡的版型檔路徑，例如 pages.json）")
+    mode = str(spec.get("mode") or "merge").strip().lower()
+    if mode not in LAYOUT_MODES:
+        raise LayoutError("project.yaml 的 layout.mode 只能是 merge 或 replace（merge＝疊加、replace＝覆寫），目前是「%s」"
+                          % (spec.get("mode"),))
+    path = Path(name).expanduser()
+    if not path.is_absolute():
+        path = Path(project.root) / path
+    return path, mode, name
+
+
+def load_project_pages(project, info=None):
+    """專案的版型：內建的 + project.yaml layout 指定的外部檔。info 有的話會被填入
+    {"file": 檔案路徑字串或 "", "mode": "merge"／"replace" 或 "", "templates": 專案檔提供的模板名稱}。"""
+    if info is not None:
+        info.clear()
+        info.update({"file": "", "mode": "", "templates": []})
+    path, mode, name = layout_spec(project)
+    base = load_pages()
+    if path is None:
+        return base
+    if not path.is_file():
+        raise LayoutError("找不到版型檔：%s（project.yaml 的 layout.file；這個檔案要放在專案資料夾裡）" % path)
+    overlay = load_pages(path)
+    if info is not None:
+        info.update({"file": str(path), "mode": mode, "templates": sorted(overlay["templates"])})
+    return merge_pages(base, overlay, "%s（project.yaml 的 layout.file）" % path, mode)
 
 
 def check_box(box, label="位置"):

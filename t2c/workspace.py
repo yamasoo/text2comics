@@ -8,22 +8,19 @@ import re
 import shutil
 from pathlib import Path
 
-from . import bible, check, compose, layout, letter, script as sc
+from . import bible, check, compose, layout, letter, script as sc, styles
 from .compile import CompileError, _seed, compile_chapter
 from .project import FRONT, Project, ProjectError
 
 CH_RE = re.compile(r"^ch(\d{3})\.(?:json|md|txt)$")
 MAX_CHAPTER = 999
 
-DEFAULT_STYLE = ("Black and white Japanese manga artwork, clean confident ink lineart, "
-                 "screentone shading, high contrast, no color")
+DEFAULT_PRESET = styles.DEFAULT_PRESET        # 新建專案的畫風預設集（mono＝日式黑白頁漫）
 PROJECT_TEMPLATE = """# 漫畫專案設定。格式說明見 text2comics 的 docs/02_資料格式.md。
 title: {title}
 language: zh-TW
 reading: rtl                 # 日式右翻：格子由右到左、由上到下
-style: >-
-  {style}
-meta: [manga panel, black and white, screentone]
+{style_block}
 megapixels: 1.0              # 每格生圖約 1 MP
 negative: nsfw, worst quality, bad anatomy, watermark, jpeg artifact, text, speech bubble, letters
 sfx_mode: overlay            # overlay＝狀聲詞由嵌字疊上；moss＝交給 MOSS 畫
@@ -70,16 +67,28 @@ def _yaml_text(text):
     return json.dumps(str(text), ensure_ascii=False)       # JSON 字串同時是合法的 YAML
 
 
+def _style_block(preset, style=""):
+    """project.yaml 的畫風那一段。預設只用 style_preset；明寫 style 才多一行。"""
+    lines = ["style_preset: %s          # 畫風預設集：mono（日式黑白頁漫）／color（彩色）／american（美式）" % preset]
+    if style:
+        lines += ["style: >-", "  " + style]
+    else:
+        lines.append('# style: "..."            # 選填：明寫就蓋掉預設集的 style')
+    lines.append("# meta: [manga panel]   # 選填：明寫就蓋掉預設集的 meta（[] 就是不帶）")
+    return "\n".join(lines)
+
+
 def sample_has_renders(sample):
     """範例專案有沒有出圖（renders/ 不進版控，新 clone 的範例沒有；M1 修正 L-7）。"""
     folder = Path(sample) / "renders" / "ch001" if sample else None
     return bool(folder and folder.is_dir() and any(folder.glob("*.png")))
 
 
-def create_project(path, title="", style="", sample=None, sample_renders=False):
+def create_project(path, title="", style="", preset=DEFAULT_PRESET, sample=None, sample_renders=False):
     """建立漫畫專案資料夾。資料夾要不存在或是空的。sample：要複製的範例專案資料夾（由呼叫端給，
     獨立工具是 examples/sample_comic；None＝建空專案）；sample_renders：連同範例的出圖、選圖、嵌字微調
-    （沒有 GPU 也能把一章走完）。回傳 Project。"""
+    （沒有 GPU 也能把一章走完）。preset：畫風預設集（mono／color／american，見 t2c/data/styles.json）。
+    回傳 Project。"""
     root = Path(str(path or "").strip()).expanduser()
     if not str(path or "").strip():
         raise WorkspaceError("請輸入新專案的資料夾路徑")
@@ -87,6 +96,11 @@ def create_project(path, title="", style="", sample=None, sample_renders=False):
         raise WorkspaceError("請輸入完整路徑（例如 E:\\comics\\作品名），目前是「%s」" % path)
     if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise WorkspaceError("%s 已經存在而且不是空的資料夾；請換一個新資料夾" % root)
+    preset = str(preset or DEFAULT_PRESET).strip()
+    try:
+        styles.preset(preset)
+    except styles.StylesError as error:
+        raise WorkspaceError(str(error))
     if sample:
         sample = Path(sample)
         if not (sample / "project.yaml").is_file():
@@ -111,8 +125,10 @@ def create_project(path, title="", style="", sample=None, sample_renders=False):
         root.mkdir(parents=True, exist_ok=True)
         for sub in ("bible/characters", "bible/locations", "source"):
             (root / sub).mkdir(parents=True, exist_ok=True)
-        style = " ".join((style or DEFAULT_STYLE).split())
-        (root / "project.yaml").write_text(PROJECT_TEMPLATE.format(title=_yaml_text(title.strip()), style=style), encoding="utf-8")
+        style = " ".join(str(style or "").split())
+        (root / "project.yaml").write_text(
+            PROJECT_TEMPLATE.format(title=_yaml_text(title.strip()), style_block=_style_block(preset, style)),
+            encoding="utf-8")
     return open_project(root)
 
 
@@ -188,13 +204,57 @@ def chapter_status(project, n):
     return row
 
 
+def set_style_preset(project, name):
+    """換一部作品的畫風預設集：改 project.yaml 的 style_preset，並拿掉明寫的 style／meta／look／sfx。
+
+    明寫的欄位會蓋掉預設集（t2c/styles.py 的逐欄覆蓋），所以換預設集時一定要一起清掉，
+    不然使用者會覺得「選了彩色卻沒變」。註解行（# style: …）不動。
+    回傳 {"path", "preset", "dropped"}；名稱不認得丟 WorkspaceError（列出可用的）。
+    """
+    root = Path(getattr(project, "root", project)).resolve()
+    path = root / "project.yaml"
+    if not path.is_file():
+        raise WorkspaceError("「%s」不是漫畫專案資料夾（找不到 project.yaml）" % root)
+    preset = str(name or "").strip() or styles.default_name()
+    try:
+        styles.preset(preset)
+    except styles.StylesError as error:
+        raise WorkspaceError(str(error))
+    lines = path.read_text(encoding="utf-8").splitlines()
+    out, dropped, written = [], [], False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if re.match(r"^style_preset\s*:", line):
+            comment = line.split("#", 1)[1].strip() if "#" in line else ""
+            out.append("style_preset: %s%s" % (preset, ("          # " + comment) if comment else ""))
+            written = True
+            i += 1
+            continue
+        matched = re.match(r"^(style|meta|look|sfx)\s*:", line)
+        if matched:
+            dropped.append(matched.group(1))
+            i += 1
+            while i < len(lines) and lines[i].strip() and lines[i][:1] in (" ", "\t"):
+                i += 1                              # 區塊純量（>-）或清單的續行一起拿掉
+            continue
+        out.append(line)
+        i += 1
+    if not written:
+        out.append("style_preset: %s" % preset)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8", newline="\n")
+    tmp.replace(path)
+    return {"path": str(path), "preset": preset, "dropped": dropped}
+
+
 def overview(project):
     cfg = project.config
     drafts = {k: sorted(bible.list_drafts(project, k)) for k in ("character", "location")}
     return {
         "root": str(project.root),
         "title": str(cfg.get("title") or project.root.name),
-        "config": {k: cfg.get(k) for k in ("title", "style", "candidates", "megapixels", "sfx_mode", "reading")},
+        "config": {k: cfg.get(k) for k in ("title", "style", "style_preset", "candidates", "megapixels", "sfx_mode", "reading")},
         "chapters": [chapter_status(project, n) for n in chapter_numbers(project)],
         "bible": {"characters": [{"id": cid, "name": c.get("name", cid)} for cid, c in project.characters.items()],
                   "locations": [{"id": lid, "name": c.get("name", lid)} for lid, c in project.locations.items()],
@@ -261,7 +321,7 @@ def read_plan(project, n):
         return {"path": str(path), "plan": None, "raw": path.read_text(encoding="utf-8"),
                 "issues": [{"level": "error", "where": "", "message": "plan/ch%03d.json 不是合法的 JSON" % n}]}
     return {"path": str(path), "plan": data,
-            "issues": issue_dicts(check.check_plan(project, data, layout.load_pages(), source=_source_or_none(project, n)))}
+            "issues": issue_dicts(check.check_plan(project, data, project.pages(), source=_source_or_none(project, n)))}
 
 
 def _source_or_none(project, n):
@@ -279,7 +339,7 @@ def save_plan(project, n, plan):
             plan = json.loads(plan)
         except ValueError as error:
             raise WorkspaceError("規劃不是合法的 JSON：%s" % error)
-    issues = check.check_plan(project, plan, layout.load_pages(), source=_source_or_none(project, n))
+    issues = check.check_plan(project, plan, project.pages(), source=_source_or_none(project, n))
     errs = sc.errors(issues)
     if errs:
         raise WorkspaceError("規劃有 %d 個問題，沒有存檔：\n%s" % (len(errs), "\n".join("  - %s" % e for e in errs)))
@@ -296,7 +356,7 @@ def save_plan(project, n, plan):
 def script_issues(project, n, text):
     """劇本的檢查（人改的版本，strict=False）：解析問題＋每頁的格數與台詞。"""
     meta, pages, issues = sc.parse_script(text)
-    pages_data = layout.load_pages()
+    pages_data = project.pages()
     for page in pages:
         tpl = pages_data["templates"].get(str(page.template))
         if page.template and tpl is None:
@@ -389,7 +449,7 @@ def _no_duplicates(pages):
 
 def storyboard_issues(project, n, board, pages_data=None):
     """編譯以外的檢查（外觀字、每行字數、和劇本是否一致）。全部當提醒回傳。"""
-    pages_data = pages_data or layout.load_pages()
+    pages_data = pages_data or project.pages()
     issues = []
     script_pages = {}
     if project.script_path(n).is_file():
@@ -454,12 +514,14 @@ def compile_one(project, n, panel_id, doc=None):
 # ---------------------------------------------------------------------------
 # 出圖與選圖
 # ---------------------------------------------------------------------------
-SUFFIX_RE = re.compile(r"_s(\d+)(?:_([A-Za-z0-9-]+))?\.png$")
+SUFFIX_RE = re.compile(r"_s(\d+)(?:_([A-Za-z0-9-]+))?(?:__([A-Za-z0-9-]+))?\.png$")
 
 
 def candidate_info(name):
+    """候選圖的檔名 → {file, seed, preset, profile}（見 comfy.render_name）。"""
     m = SUFFIX_RE.search(name)
-    return {"file": name, "seed": int(m.group(1)) if m else None, "preset": (m.group(2) or "") if m else ""}
+    return {"file": name, "seed": int(m.group(1)) if m else None,
+            "preset": (m.group(2) or "") if m else "", "profile": (m.group(3) or "") if m else ""}
 
 
 def panels_status(project, n):

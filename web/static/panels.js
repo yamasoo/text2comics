@@ -17,19 +17,45 @@
   }
 
   T2C.tabs.panels = async (ctx, body, { n }) => {
+    // 出圖 profile（N4）：project.yaml 的 comfy_profile 是這一章的預設，介面可以臨時換一組；
+    // 換了就要重新抓一次資料，presets／default_preset 才是那一組的。
+    const presetKey = "render.preset";
+    const profileKey = "render.profile";
+    const storedProfile = FE.store.get(profileKey, "");
     let data;
     try {
-      data = await T2C.get("/api/chapter/panels", { chapter: n }, ctx);
+      data = await T2C.get("/api/chapter/panels", { chapter: n, profile: storedProfile || "" }, ctx);
     } catch (error) {
       if (error.name === "AbortError") throw error;
       body.replaceChildren(h("div", { class: "stack" }, h("div", { class: "alert alert-err" }, error.message),
         h("p", {}, "先到「分鏡」分頁把分鏡修到能編譯。")));
       return;
     }
-    const presetKey = "render.preset";
+    const storedPreset = FE.store.get(presetKey, "");
+    const presetValue = data.presets.includes(storedPreset) ? storedPreset : data.default_preset;
     const preset = h("select", { "aria-label": "出圖預設", onchange: () => FE.store.set(presetKey, preset.value) },
-      data.presets.map((p) => h("option", { value: p, selected: p === (FE.store.get(presetKey, "") || data.default_preset) }, p === data.default_preset ? `${p}（預設）` : p)));
-    const render = (body2, label) => T2C.run("/api/task/render", Object.assign({ chapter: n, preset: preset.value || null }, body2));
+      data.presets.map((p) => h("option", { value: p, selected: p === presetValue }, p === data.default_preset ? `${p}（預設）` : p)));
+    const profiles = data.profiles || [];
+    // 顯示文字來自 data.profile_info（[{name, kind, unet}]）：一組 profile＝ComfyUI 上的一組模型。
+    // value 仍是 profile 名稱，送出與 FE.store 的行為不變。
+    const profileInfo = data.profile_info || [];
+    const infoOf = (name) => profileInfo.find((x) => x.name === name) || null;
+    const unetOf = (x) => (x && x.unet) || "沒有指定模型";
+    const profileText = (name) => {
+      const x = infoOf(name);
+      const text = x ? `${x.kind || name} · ${unetOf(x)}` : name;
+      return name === data.project_profile ? `${text}（這一章）` : text;
+    };
+    const profile = h("select", { "aria-label": "出圖 profile",
+      title: `這一章預設用 ${data.project_profile}；同一臺 ComfyUI 一次只掛一組模型，換 profile 請先在 ComfyUI 換模型。`,
+      onchange: () => {
+        FE.toast(`${profile.value}：請先在 ComfyUI 換成這一組的模型（${unetOf(infoOf(profile.value))}）`, "warn");
+        FE.store.set(profileKey, profile.value);
+        FE.route();
+      } },
+      profiles.map((p) => h("option", { value: p, selected: p === data.profile }, profileText(p))));
+    // body2 的 profile 會蓋掉下拉的（候選圖的「重畫」要用那一張自己的 profile）。
+    const render = (body2, label) => T2C.run("/api/task/render", Object.assign({ chapter: n, preset: preset.value || null, profile: profile.value || null }, body2));
     const rendered = data.panels.filter((p) => p.candidates.length).length;
     const picked = data.panels.filter((p) => p.pick).length;
     const unpicked = data.panels.filter((p) => p.candidates.length && !p.pick);
@@ -46,6 +72,9 @@
         h("span", { class: "grow" }, `已出圖 ${rendered}／${data.panels.length} 格，已選圖 ${picked}／${data.panels.length} 格。`,
           h("span", { class: "muted" }, "　點縮圖就是選它；沒選的格組版時暫用第一張。")),
         data.presets.length ? h("label", { class: "row t2c-inline" }, "出圖預設", preset) : null,
+        profiles.length ? h("div", { class: "stack t2c-tight" },
+          h("label", { class: "row t2c-inline" }, "出圖 profile", profile),
+          h("span", { class: "muted t2c-small" }, "同一臺 ComfyUI 一次只掛一組模型；換 profile 請先在 ComfyUI 換模型。")) : null,
         h("button", { class: "btn btn-primary", type: "button", onclick: () => render({}) }, "整章出圖（補沒畫的）"),
         unpicked.length ? h("button", { class: "btn", type: "button", onclick: pickAll }, `沒選的 ${unpicked.length} 格先選第一張`) : null,
         h("a", { class: "btn", href: FE.hash("chapter", n, { tab: "pages" }) }, "下一步：頁面 →")),
@@ -58,13 +87,15 @@
       const more = h("select", { "aria-label": "加畫張數" }, [1, 2, 3, 4].map((k) => h("option", { value: k }, `加畫 ${k} 張`)));
       const chosen = p.pick && p.pick.image;
       const thumbs = p.candidates.map((c) => h("figure", { class: ["pn-cand", c.file === chosen && "pn-picked"] },
-        h("button", { class: "pn-thumb", type: "button", title: `選這張（seed ${c.seed}${c.preset ? "，" + c.preset : ""}）`, onclick: () => choose(p, c.file) },
+        h("button", { class: "pn-thumb", type: "button", title: `選這張（seed ${c.seed}${c.preset ? "，" + c.preset : ""}${c.profile ? "，profile " + c.profile : ""}）`, onclick: () => choose(p, c.file) },
           h("img", { src: T2C.img(`${data.renders}/${c.file}`, THUMB), alt: c.file, loading: "lazy" })),
         h("figcaption", { class: "row t2c-tight" },
-          h("span", { class: "grow t2c-small" }, `s${c.seed}`, c.preset ? h("span", { class: "chip" }, c.preset) : null, c.file === chosen ? T2C.chip("已選", "ok") : null),
+          h("span", { class: "grow t2c-small" }, `s${c.seed}`, c.preset ? h("span", { class: "chip" }, c.preset) : null,
+            c.profile ? h("span", { class: "chip chip-info", title: `出圖 profile：${c.profile}` }, c.profile) : null,
+            c.file === chosen ? T2C.chip("已選", "ok") : null),
           h("a", { class: "btn btn-sm btn-ghost", href: T2C.img(`${data.renders}/${c.file}`), target: "_blank", rel: "noopener", title: "看原圖" }, "原圖"),
           h("button", { class: "btn btn-sm btn-ghost", type: "button", title: "用同一個 seed 重畫（覆蓋這張）",
-            onclick: async () => { if (await FE.confirm(`用 seed ${c.seed} 重畫並覆蓋 ${c.file}？`, { ok: "重畫" })) render({ panel: p.id, seed: c.seed, preset: c.preset || null }); } }, "重畫"))));
+            onclick: async () => { if (await FE.confirm(`用 seed ${c.seed} 重畫並覆蓋 ${c.file}？`, { ok: "重畫" })) render({ panel: p.id, seed: c.seed, preset: c.preset || null, profile: c.profile || null }); } }, "重畫"))));
       return h("article", { class: ["card card-flat stack t2c-tight pn-card", !p.candidates.length && "pn-empty"] },
         h("div", { class: "row" }, h("b", {}, `第 ${p.slot} 格`), h("code", { class: "t2c-small" }, p.id),
           h("span", { class: "muted t2c-small grow" }, `${p.gen_size[0]}×${p.gen_size[1]}`),

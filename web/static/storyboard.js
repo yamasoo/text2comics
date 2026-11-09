@@ -11,8 +11,21 @@
   const MIN = 0.03;
 
   T2C.tabs.storyboard = async (ctx, body, { n, status }) => {
-    const data = await T2C.get("/api/chapter/storyboard", { chapter: n }, ctx);
+    let data;
+    try {
+      data = await T2C.get("/api/chapter/storyboard", { chapter: n }, ctx);
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      // 版型檔（project.yaml 的 layout.file）壞掉時後端回 400，訊息裡有檔名與第幾格；照原樣顯示。
+      body.replaceChildren(h("div", { class: "stack" },
+        h("div", { class: "alert alert-err" }, `讀不到分鏡：${error.message}`),
+        h("p", { class: "muted" }, "分鏡檔或版型檔（project.yaml 的 layout.file）壞掉時會這樣；修好檔案再重新載入。"),
+        h("div", { class: "row" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => FE.route() }, "重新載入"))));
+      return;
+    }
     const vocab = data.vocab;
+    const layout = vocab.layout || { file: "", mode: "", templates: [] };
+    const fileName = (path) => String(path || "").split(/[\\/]/).filter(Boolean).pop() || "";
     const pageSel = h("select", {}, h("option", { value: "" }, "整章"),
       ((data.storyboard && data.storyboard.pages) || []).map((p) => h("option", { value: p.page }, `只重做第 ${p.page} 頁`)));
     const generate = async () => {
@@ -75,6 +88,11 @@
         h("button", { class: "btn", type: "button", onclick: () => discard() }, "放棄修改"),
         h("button", { class: "btn btn-primary", type: "button", onclick: () => save() }, "存檔"),
         h("a", { class: "btn btn-primary", href: FE.hash("chapter", n, { tab: "panels" }) }, "下一步：出圖 →")),
+      layout.file
+        ? h("div", { class: "row t2c-tight", title: layout.file },
+            T2C.chip(`版型：${fileName(layout.file)}（${layout.mode === "replace" ? "覆寫" : "疊加"}）`, "info"),
+            h("span", { class: "muted t2c-small" }, `${layout.file}　專案模板：${(layout.templates || []).join("、") || "（沒有）"}`))
+        : null,
       issuesEl,
       h("div", { class: "sb-wrap" }, tablesEl, editorEl),
       h("details", { class: "card card-flat" }, h("summary", {}, "重新產生"), genRow)));
@@ -83,9 +101,11 @@
     drawEditor();
 
     function drawIssues() {
-      issuesEl.replaceChildren(
+      // replaceChildren(null) 會留下字串 "null"：先濾掉空值。
+      issuesEl.replaceChildren(...[
         st.compileError ? h("div", { class: "alert alert-err" }, `無法編譯：${st.compileError}`) : null,
-        T2C.issues(st.issues, { title: "分鏡檢查", open: false }));
+        T2C.issues(st.issues, { title: "分鏡檢查", open: false }),
+      ].filter(Boolean));
     }
 
     /* ── 表格 ── */
@@ -95,7 +115,8 @@
         return h("section", { class: "card card-flat stack t2c-tight" },
           h("div", { class: "row" }, h("b", {}, `第 ${page.page} 頁`),
             h("select", { "aria-label": "模板", onchange: (e) => changeTemplate(pi, e.target.value) },
-              Object.entries(vocab.templates).map(([k, t]) => h("option", { value: k, selected: k === page.template }, `${k}：${t.name}（${t.panels.length} 格）`))),
+              Object.entries(vocab.templates).map(([k, t]) => h("option", { value: k, selected: k === page.template },
+                `${k}：${t.name}（${t.panels.length} 格${t.source === "project" ? "・專案" : ""}）`))),
             h("span", { class: "grow" }),
             pi === st.board.pages.length - 1 && st.board.pages.length > 1
               ? h("button", { class: "btn btn-sm btn-ghost", type: "button", onclick: () => removeLastPage() }, "刪除這一頁") : null),

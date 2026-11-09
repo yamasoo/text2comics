@@ -218,12 +218,18 @@ def test_render_name_adds_suffix_only_for_non_default_preset():
     assert comfy.render_name("p001_k1", 5, "draft", "final") == "p001_k1_s5_draft.png"
 
 
-def test_example_config_presets_are_valid():
-    cfg = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))["comfy"]
-    presets = {k: v for k, v in cfg["presets"].items() if not k.startswith("_")}
-    assert cfg["default_preset"] in presets and "draft" in presets
-    for preset in presets.values():
-        comfy.apply_preset(comfy.load_workflow(), dict(preset))                 # 不丟錯
+def test_example_config_profiles_are_valid():
+    """config.example.json 的兩組 profile：kind 認得、模型齊、每組的預設與 LoRA 套得上（N4）。"""
+    cfg = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+    table = comfy.profile_table(cfg)
+    assert set(table) >= {"moss", "anima"} and cfg["comfy"]["default_profile"] in table
+    for name in table:
+        profile = comfy.resolve_profile(cfg, name)
+        assert profile["workflow"].is_file() and set(profile["models"]) >= {"unet", "clip", "vae"}, name
+        chosen, preset, default = comfy.resolve_preset(profile)
+        assert chosen == default and chosen in profile["presets"]
+        for preset in profile["presets"].values():
+            comfy.apply_preset(comfy.load_workflow(profile["workflow"]), dict(preset), profile["loras"])   # 不丟錯
 
 
 def test_panels_cli_with_fake_comfyui(tmp_path):

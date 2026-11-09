@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 from . import layout
 
 PICKS_VERSION = 1
-CANDIDATE_RE = re.compile(r"^(?P<id>.+)_s\d+(?:_[A-Za-z0-9-]+)?\.png$")
+CANDIDATE_RE = re.compile(r"^(?P<id>.+)_s\d+(?:_[A-Za-z0-9-]+)?(?:__[A-Za-z0-9-]+)?\.png$")
 ZOOM_MIN, ZOOM_MAX = 1.0, 4.0
 PLACEHOLDER = 200      # 沒有圖的格子的灰底
 
@@ -261,7 +261,7 @@ def render_page(project, chapter, page, pages_data=None, picks=None, gray=True, 
                 letters=None, guides=False, art=None):
     """一頁：組版（＋嵌字）。回傳 (PIL.Image, plan 或 None, warnings)。
     art 是已經組好的頁面（介面拖曳預覽時重用，避免每次重新裁圖）；會複製一份，不會改到它。"""
-    pages_data = pages_data or layout.load_pages()
+    pages_data = pages_data or project.pages()
     picks = load_picks(project, chapter) if picks is None else picks
     if art is None:
         canvas, warnings = compose_page(project, chapter, page, pages_data, picks, gray=gray, numbers=numbers)
@@ -291,7 +291,7 @@ def compose_chapter(project, chapter, storyboard, pages_data=None, only_page=Non
 
     lettering 是 letter.Settings（或 config.json 的 lettering dict）時，組版後接著嵌字（t2c/letter.py）；
     None 表示只組版。letters 是嵌字微調（None 就讀 letters/chNNN.json）。guides 畫臉框與 anchor（檢查用）。"""
-    pages_data = pages_data or layout.load_pages()
+    pages_data = pages_data or project.pages()
     picks = load_picks(project, chapter) if picks is None else picks
     warnings = []
     if lettering is not None:

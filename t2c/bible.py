@@ -586,22 +586,26 @@ def renders_dir(project):
     return project.root / "renders" / "bible"
 
 
-def resolve_preset(cfg, name=None):
-    """出圖預設：(名稱, 內容, 預設名稱)。和 tools/panels.py 同一套規則。"""
-    comfy_cfg = cfg["comfy"]
-    presets = {k: v for k, v in (comfy_cfg.get("presets") or {}).items() if not k.startswith("_")}
-    default = comfy_cfg.get("default_preset") or None
-    chosen = name or default
-    if chosen and chosen not in presets:
-        raise BibleError("找不到出圖預設「%s」（config.json 的 comfy.presets 有：%s）" % (chosen, "、".join(presets) or "無"))
-    return chosen, presets.get(chosen) if chosen else None, default
+def resolve_preset(cfg, name=None, profile=None):
+    """出圖預設：(名稱, 內容, 預設名稱)。預設表來自出圖 profile（N4）；和 tools/panels.py 同一套規則。"""
+    try:
+        prof = profile if profile is not None else comfy.resolve_profile(cfg)
+        return comfy.resolve_preset(prof, name)
+    except comfy.ComfyError as error:
+        raise BibleError(str(error))
 
 
-def render_sheets(project, jobs, manifest, cfg, preset_name=None, force=False, should_stop=None, on_event=None, only_seeds=None):
-    """送 ComfyUI 出圖，檔名 renders/bible/<job id>_s<seed>.png（用了非預設的出圖預設會加後綴）。已存在的跳過。回傳寫出的檔名清單。"""
-    chosen, preset, default = resolve_preset(cfg, preset_name)
-    base = cfg["comfy"]["url"]
-    workflow = comfy.config_workflow(cfg)
+def render_sheets(project, jobs, manifest, cfg, preset_name=None, force=False, should_stop=None, on_event=None, only_seeds=None,
+                  profile_name=None):
+    """送 ComfyUI 出圖，檔名 renders/bible/<job id>_s<seed>[_<預設>][__<profile>].png。已存在的跳過。回傳寫出的檔名清單。"""
+    try:
+        profile = comfy.resolve_profile(cfg, name=profile_name, project_config=project.config)
+        workflow = comfy.load_workflow(profile["workflow"])
+        default_profile = comfy.default_profile_name(cfg)
+    except comfy.ComfyError as error:
+        raise BibleError(str(error))
+    chosen, preset, default = resolve_preset(cfg, preset_name, profile)
+    base = profile["base_url"]
     folder = renders_dir(project)
     folder.mkdir(parents=True, exist_ok=True)
     save_sheet_jobs(project, jobs, manifest)
@@ -610,18 +614,20 @@ def render_sheets(project, jobs, manifest, cfg, preset_name=None, force=False, s
     for i, (job, seed) in enumerate(todo, 1):
         if should_stop and should_stop():
             raise llm.Cancelled()
-        name = comfy.render_name(job["id"], seed, chosen, default)
+        name = comfy.render_name(job["id"], seed, chosen, default, profile["name"], default_profile)
         target = folder / name
         if target.exists() and not force:
             if on_event:
                 on_event({"kind": "skip", "done": i, "total": len(todo), "file": name})
             continue
-        wf, out_id = comfy.prepare(workflow, job["prompt"], job["negative"], seed, job["width"], job["height"],
-                                   models=cfg["comfy"].get("models"), prefix="text2comics/bible", preset=preset)
+        negative = job.get("negative") or profile.get("negative") or ""
+        wf, out_id = comfy.prepare(workflow, job["prompt"], negative, seed, job["width"], job["height"],
+                                   models=profile.get("models"), prefix="text2comics/bible", preset=preset,
+                                   loras=profile.get("loras"), profile_name=profile["name"])
         try:
             data = comfy.run(base, wf, out_id, should_stop=should_stop or (lambda: False))
         except comfy.ComfyError as error:
-            raise BibleError("%s（%s seed %d）" % (error, job["id"], seed))
+            raise BibleError("%s（%s seed %d，profile %s）" % (error, job["id"], seed, profile["name"]))
         target.write_bytes(data)
         written.append(name)
         if on_event:
@@ -629,7 +635,7 @@ def render_sheets(project, jobs, manifest, cfg, preset_name=None, force=False, s
     return written
 
 
-RENDER_RE = re.compile(r"^(?P<job>.+)_s(?P<seed>\d+)(?:_(?P<preset>[A-Za-z0-9-]+))?\.png$")
+RENDER_RE = re.compile(r"^(?P<job>.+)_s(?P<seed>\d+)(?:_(?P<preset>[A-Za-z0-9-]+))?(?:__(?P<profile>[A-Za-z0-9-]+))?\.png$")
 
 
 def render_files(project, kind, cid):
