@@ -1,6 +1,6 @@
 # CLAUDE.md — 文字轉漫畫（text2comics）
 
-給在這個專案工作的 Claude Code／其他 AI 看的規則。新對話開始時依序讀：本檔 → `docs/HANDOFF.md` → `docs/00_階段計畫.md` 中目前的階段。
+給在這個專案工作的 Claude Code／其他 AI 看的規則。新對話開始時先讀本檔，架構與流程見 `docs/01_架構與流程.md`。開發過程的交接、待辦與階段計畫不放在這個分支，在 `dev` 分支。
 
 ## 1. 這個專案是什麼
 
@@ -11,10 +11,10 @@
 
 | 目錄 | 權限 | 說明 |
 |---|---|---|
-| `E:\dev\text2comics` | 讀寫 | 本專案 |
-| `E:\novel-studio` | **唯讀** | 參考它的 ComfyUI／MOSS 出圖機制（`studio/comfy.py`、`studio/illust.py`）、LLM 連線（`studio/providers.py`）、書庫格式。開發分支是 `dev` |
-| `E:\text_2_visual_novel` | **唯讀** | 之後的整合對象 |
-| `E:\dev\front-end` | **唯讀** | fekit 本體。fekit 有問題記到 `docs/backlog.md`，到 fekit 自己的對話修 |
+| `<專案根目錄>` | 讀寫 | 本專案（下表路徑都是相對於它的寫法） |
+| `<novel-studio 專案根>` | **唯讀** | 參考它的 ComfyUI／MOSS 出圖機制（`studio/comfy.py`、`studio/illust.py`）、LLM 連線（`studio/providers.py`）、書庫格式。開發分支是 `dev` |
+| `<text_2_visual_novel 專案根>` | **唯讀** | 之後的整合對象 |
+| `<fekit 專案根>` | **唯讀** | fekit 本體。fekit 有問題到 fekit 自己的對話修 |
 | 其他位置 | 不碰 | — |
 
 整合階段（I2、I4）在**該專案自己的對話**、依它的 `CLAUDE.md` 進行，不在本專案的對話裡改它們。
@@ -38,18 +38,18 @@
 4. 頁面：`FE.PAGES.<key> = (ctx) => {...}`，一律用 `ctx.view`／`ctx.crumbs`，請求傳 `signal: ctx.signal`。
 5. 後端錯誤：`fekit.ApiError(status, "繁體中文訊息", code)`；任務失敗 `JobError("一句話")`。核心的錯誤用各模組自己的 Exception（`CompileError`、`ProjectError`…），訊息要寫出是哪一頁哪一格。
 6. 長工作（出圖、LLM）一律用 `JobRunner` 背景任務，迴圈裡呼叫 `job.checkpoint()`。
-7. `vendor/fekit/` 不要改；升級用 `E:\dev\front-end\tools\sync_kit.py`。
+7. `vendor/fekit/` 不要改；升級用 `<fekit 專案根>\tools\sync_kit.py`。
 8. 介面文字與文件用繁體中文（台灣用語），不可出現簡體字。生圖提示詞用英文；要畫進圖裡的字保留原文。
 9. 金鑰不寫進任何檔案：DeepSeek 先讀環境變數 `DEEPSEEK_API_KEY`，沒有再讀系統金鑰庫（服務 `novel-studio`、帳號 `deepseek`，與 Novel Studio、t2vn 共用；只讀不寫，需要 `pip install keyring`）；`config.json` 不進版控。
 
 ## 5. 工作流程
 
-- **一個對話只做一個階段**（見 `docs/00_階段計畫.md`）。不要順手做下一階段的事；發現範圍外的需求記到 `docs/backlog.md`。
+- **一個對話只做一個階段**。不要順手做下一階段的事；範圍外的需求先記下來，不要順手做。
 - 動工前確認：本階段的範圍、要讀的參考檔、驗收方式。
 - 需要 GPU 的驗收（出圖）只能在使用者的 Windows 電腦上做。不能實際出圖時，寫清楚哪些項目待使用者驗證，不要假裝驗過。
 - 結束前：
   1. 依本階段的「驗收」實際檢查（`python -m pytest tests`、開頁面、看出圖結果），不要只靠描述。
-  2. 更新 `docs/HANDOFF.md`、`docs/00_階段計畫.md` 的狀態欄；有改資料格式就更新 `docs/02_資料格式.md` 與 `CHANGELOG.md`。
+  2. 有改資料格式就更新 `docs/02_資料格式.md` 與 `CHANGELOG.md`。
   3. git：能執行就提交；不能的話，在結束報告附上可以直接貼上執行的指令。
 
 ## 6. 階段結束報告（必做）

@@ -2,7 +2,7 @@
 
 ## 0.9.0 — 2026-11-09（M1 修正）
 
-依 `docs/qa/M1.md` 修 M-1、M-2、M-3 與 L-1–L-7。M-4（長得像的角色）等使用者決定記號；L-8–L-12 未動。
+依 M1 驗收紀錄修 M-1、M-2、M-3 與 L-1–L-7。M-4（長得像的角色）等使用者決定記號；L-8–L-12 未動。
 
 - **M-1 畫面外的說話者（格式變更，`docs/02_資料格式.md` 第 4、5、10 節）**：
   - 對話框新增種類 `radio`（通訊、電話、廣播：細密規則鋸齒的電子音框）與選填欄位 `offscreen`（預設 `false`）。`offscreen: true` 時 `speaker` 仍必填、必須是聖經角色，但**不可以**列在這一格的 `characters`；不送進生圖、不算進「exactly N people」。`thought`、`narration` 不能 offscreen。
@@ -117,7 +117,7 @@
 - 編譯：一格有 2 個以上角色時，角色 caption 最前面加左右位置句（依 `box` 中心判斷；He／She 由 `look_en` 推斷）。
 - 範例：`project.yaml` 的 `candidates` 2 → 3；第 2 格的「a hand」改成「one hand」。
 - 測試：新增 3 項（無邊框句、左右位置句、`side_of_frame` 門檻）。
-- 依據與數字見 `docs/qa/S1_出圖實測.md`。資料格式沒有新增欄位。
+- 資料格式沒有新增欄位。
 
 ## 0.1.0 — 2026-11-08（S0）
 

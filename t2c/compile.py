@@ -74,7 +74,7 @@ def side_of_frame(box):
 
 
 def _subject(card):
-    """從 look_en 判斷用 She／He／This character（S1 實測：多角色時要寫明左右，見 docs/qa/S1_出圖實測.md）。"""
+    """從 look_en 判斷用 She／He／This character（S1 實測：多角色時要寫明左右）。"""
     words = set(re.findall(r"[a-z]+", str(card.get("look_en", "")).lower()))
     if words & {"woman", "girl", "female", "lady"}:
         return "She"

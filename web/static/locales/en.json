@@ -7,7 +7,7 @@
   "開始示範任務": "Start demo task",
   "文字轉漫畫": "Text to Comics",
   "把小說改編成日式黑白頁漫：改編 → 漫畫劇本 → 分鏡 → MOSS-Image 逐格出圖 → 嵌字 → 組版。": "Adapt novels into black-and-white Japanese-style manga pages: adaptation → comic script → storyboard → per-panel MOSS-Image renders → lettering → page layout.",
-  "目前是骨架階段：先到「任務」頁編譯範例分鏡，確認每格的提示詞。進度見 docs/00_階段計畫.md。": "This is the scaffold stage: open Tasks and compile the sample storyboard to check each panel's prompt. Progress is in docs/00_階段計畫.md.",
+  "目前是骨架階段：先到「任務」頁編譯範例分鏡，確認每格的提示詞。": "This is the scaffold stage: open Tasks and compile the sample storyboard to check each panel's prompt.",
   "編譯範例分鏡": "Compile sample storyboard",
   "嵌字": "Lettering",
   "存檔": "Save",

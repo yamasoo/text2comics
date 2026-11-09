@@ -7,14 +7,14 @@
         └──── DeepSeek／llama.cpp ────┘   └─ 程式編譯 ─┘   └ ComfyUI ┘   └──── Pillow ────┘
 ```
 
-先做成獨立工具，之後再併入 Novel Studio（`E:\novel-studio`）與 text_2_visual_novel（`E:\text_2_visual_novel`）。
+先做成獨立工具，之後再併入 Novel Studio 與 text_2_visual_novel。
 
-> 目前進度：**S8 輸出完成**（S7 介面之上）。在瀏覽器裡就能走完一章：開專案 → 貼原著 → 改編規劃 → 劇本 → 分鏡（表格＋框編輯器）→ 逐格出圖、挑圖、裁切 → 嵌字 → 輸出頁面；也可以按「整章批次」一次跑完（會照顧 VRAM：本機 LLM 與 ComfyUI 不同時佔 GPU）。視覺聖經的草稿確認與定裝圖挑選也在介面裡。「頁面」分頁可以直接下載整章 PDF／CBZ（右翻，S8）。進度見 `docs/00_階段計畫.md`，介面設計見 `docs/05_介面設計.md`。
+> 目前進度：**S8 輸出完成**（S7 介面之上）。在瀏覽器裡就能走完一章：開專案 → 貼原著 → 改編規劃 → 劇本 → 分鏡（表格＋框編輯器）→ 逐格出圖、挑圖、裁切 → 嵌字 → 輸出頁面；也可以按「整章批次」一次跑完（會照顧 VRAM：本機 LLM 與 ComfyUI 不同時佔 GPU）。視覺聖經的草稿確認與定裝圖挑選也在介面裡。「頁面」分頁可以直接下載整章 PDF／CBZ（右翻，S8）。介面設計見 `docs/05_介面設計.md`。
 
 ## 快速開始
 
 ```powershell
-cd E:\dev\text2comics
+cd <專案根目錄>
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -62,29 +62,27 @@ python tools\export.py examples\sample_comic 1 --format all          # 打包右
 | `examples/sample_comic/` | 範例漫畫專案（原著一章、1 頁 5 格） |
 | `app.py`、`server/`、`web/` | 介面（fekit：FastAPI＋免建置前端）：專案、章節（原著／規劃／劇本／分鏡／出圖／頁面）、視覺聖經、嵌字。`server/` 是 API 與背景任務，只呼叫 `t2c` |
 | `vendor/fekit/` | fekit 的複製品，**不要直接改**（見下） |
-| `docs/` | 計畫、架構、資料格式、建置說明、交接 |
+| `docs/` | 架構、資料格式、建置說明、提示詞、介面 |
 
 ## 文件
 
 | 文件 | 什麼時候看 |
 |---|---|
-| `docs/00_階段計畫.md` | 下一步做什麼、每階段的驗收與建議模型 |
 | `docs/01_架構與流程.md` | 為什麼這樣設計（MOSS-Image 的特性與限制） |
 | `docs/02_資料格式.md` | 漫畫專案資料夾、角色卡、劇本、分鏡 JSON 的格式 |
 | `docs/03_建置與環境.md` | 從零把環境建起來 |
 | `docs/04_提示詞設計.md` | 文字端三階段的分工、提示詞、驗證與回修 |
-| `docs/HANDOFF.md` | 給下一個對話的交接 |
 
 ## 更新 fekit
 
 `vendor/fekit/` 由 fekit 本體同步（目前模組：`i18n`、`md`、`filepicker`、`table`）：
 
 ```powershell
-python E:\dev\front-end\tools\sync_kit.py E:\dev\text2comics              # 更新
-python E:\dev\front-end\tools\sync_kit.py E:\dev\text2comics --add graph  # 加模組
+python <fekit 專案根>\tools\sync_kit.py <專案根目錄>              # 更新
+python <fekit 專案根>\tools\sync_kit.py <專案根目錄> --add graph  # 加模組
 ```
 
-fekit 的問題回 `E:\dev\front-end` 修，再同步進來。
+fekit 的問題回 fekit 本體修，再同步進來。
 
 ## 授權
 
