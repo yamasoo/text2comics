@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 from . import layout
 
 PICKS_VERSION = 1
-CANDIDATE_RE = re.compile(r"^(?P<id>.+)_s\d+\.png$")
+CANDIDATE_RE = re.compile(r"^(?P<id>.+)_s\d+(?:_[A-Za-z0-9-]+)?\.png$")
 ZOOM_MIN, ZOOM_MAX = 1.0, 4.0
 PLACEHOLDER = 200      # 沒有圖的格子的灰底
 

@@ -1,8 +1,97 @@
 # 交接
 
-## 目前狀態（2026-11-08，S6 完成）
+## 目前狀態（2026-11-09，M1 雲端部分完成，Windows 實機待使用者）
 
-### S6 做了什麼
+M1 的完整報告在 `docs/qa/M1.md`。重點：
+
+- **通過的**：`pytest` 272 項全過；用《第一次火星獨立戰爭》第 1 章（不是範例）走完 小說 → 規劃 → 劇本 → 分鏡 → 編譯 → 出圖（假 ComfyUI）→ 組版 → 嵌字 → PDF／CBZ，7 頁 35 格；文字端由 Claude 代替模型回答真實提示詞，刻意放的 5 種錯誤都被驗證擋下、照訊息回修一次就過；送進 ComfyUI 的 70 份 prompt 沒有台詞、沒有中文、外觀逐字來自聖經、不在場的角色不出現、seed 可重現；PDF／CBZ 旗標正確、重跑位元組相同；介面開新專案各頁正常、無主控台錯誤。`CLAUDE.md` 規則 3.1–3.8、4.1–4.9 逐條檢查都遵守。
+- **要修的（中等）**：M-1 隔著通訊／電話的聲音會被畫進格子（格式要加畫面外說話）；M-2 對話框閱讀順序錯了不會警告（這章 31 組有 4 組）；M-3 `t2c/` 靠上一層資料夾找 `layouts/`、`workflows/`，不能單獨搬走（I1／I3 會碰到）；M-4 陳嘉禾、周遠、阿海、`guard_plain` 的定裝圖幾乎分不出來（要你決定視覺記號）。輕微問題 L-1–L-12 見報告。都已記進 `docs/backlog.md`。
+- **待你在 Windows 上做**：報告第 5 節的 7 步（pytest、LLM 連線、DeepSeek 實跑新章節、實際出圖、選圖與輸出、閱讀器右翻、定裝圖挑選）。做完回報後 M1 才算完成。
+- **參考專案**：`work/m1_mars_ch1/`（不進版控）有這次產生的規劃、劇本、分鏡，可以當 DeepSeek 實跑的對照答案；實跑請先複製一份再刪掉 plan／script／storyboard。
+- **交接文件與實際狀態不同的地方**：`work/mars_war` 的卡片已是 `status: confirmed`，定裝圖 11-08 晚上已在 GPU 出完（還沒挑，沒有 `bible/picks.json`）；下面 S6 段落寫的「還是草稿」已過時。
+- **Git**：最後一個 commit 是 11-08 22:47（S4 修正），S6–S8 與 M1 的檔案需要提交，指令在報告第 6 節。
+
+### 下一步建議
+
+1. 你先做完報告第 5 節（不需要開對話）。
+2. 開一個修正階段（建議名「M1 修正」）：M-1 是格式變更，用 Opus 5.5／high；M-2、M-3、L-1–L-7 依規格實作，Sonnet 5.5／medium 即可。M-4 等你決定角色記號後在 S6 流程改卡片、重出定裝圖。
+3. 修完、Windows 實機也過了，把 M1 標完成，再進 I1。
+
+## S8（輸出）的交接（2026-11-09）
+
+### S8 做了什麼
+
+- **輸出**：`t2c/export.py`＋命令列 `tools/export.py`＋介面「頁面」分頁的下載按鈕。把已輸出的 `pages/chNNN/pNNN.png` 打包成右翻的 PDF 或 CBZ，整章或單頁，同時存在專案的 `out/`。格式見 `docs/02_資料格式.md` 第 15 節。
+  - PDF：自己寫檔（Pillow 不能設閱讀方向）；`/ViewerPreferences << /Direction /R2L >>`，預設 `/PageLayout /TwoPageRight`。
+  - CBZ：PNG 原檔＋`ComicInfo.xml`（`Manga=YesAndRightToLeft`）。
+- 介面：「頁面」分頁多了「整章 PDF／整章 CBZ／這頁 PDF」與「PDF 用單頁檢視開啟」；頁面 PNG 沒輸出齊時按鈕停用並說明；API 是 `GET /api/chapter/export`。
+- 測試：`tests/test_export.py` 22 項、`tests/test_ui.py` 多 1 項。雲端 Linux 全部通過（除了下面說明的一項環境問題）；用 poppler 把產生的 PDF 轉成圖，頁序與內容正確，`qpdf --check` 無錯。
+
+### S8 的決定
+
+- **不重新組版**：只打包現有的頁面 PNG。缺頁就報錯（列出全部缺的頁碼），PNG 比分鏡、選圖或嵌字舊就列提醒。這樣「輸出頁面」仍是唯一產生頁面的地方。
+- **PDF 內頁預設 JPEG 品質 90**（約為無損的一半大小，範例頁 1.6 MB vs 3.0 MB／3 頁）；要無損加 `--lossless`。
+- **PDF 預設用雙頁檢視開啟**（第 1 頁單獨在右，之後左右成對），因為右翻在單頁檢視看不出差別；要單頁加 `--single`（介面有勾選）。
+- 閱讀方向固定右翻（和組版一致；`project.yaml` 的 `reading` 目前只支援 `rtl`）。
+- 下載是同步的（打包幾秒內完成），不走背景任務。
+- 沒做：多章合訂本、PDF 書籤／目錄、EPUB、把 CBZ 的 ComicInfo 加更多欄位（作者、簡介）。記在 backlog。
+
+### 待決問題
+
+（承接 S1–S7 的 1–13 項，見下方）
+
+14. （S8）內頁 JPEG 90 夠不夠：嵌字的小字邊緣會不會看得出壓縮痕跡？不滿意就改 `--quality 95` 或 `--lossless`，也可以把預設改成無損。
+15. （S8）PDF 預設雙頁檢視是否符合你的閱讀習慣（平板直立閱讀通常想要單頁）。要改預設就改 `export.export_chapter(spread=…)` 與介面勾選的預設。
+
+### 沒有驗證的
+
+- **真實閱讀器的右翻行為**：雲端只能驗證檔案內容（旗標存在、頁序正確、poppler 能轉圖）。請在你的閱讀器各開一次 `out\ch001.pdf` 與 `out\ch001.cbz`（建議 Acrobat／Edge 與 CBZ 閱讀器如 YACReader、CDisplayEx、Komga），確認：第 1 頁在右邊、翻頁方向由右往左。用範例一章做就好。
+- Windows 上的 `pytest`（含 `tests/test_export.py`）。雲端我只複製了需要的檔案，所以 `test_ui.py::test_create_project_new_and_from_sample` 因為雲端沒有範例的出圖（`renders/`）而失敗，與 S8 無關；Windows 上有完整範例應該會通過。
+- S7 與更早階段留下的項目照舊（見下）。
+
+### 流程提醒
+
+- 這台電腦沒有 shell 可用時，檔案透過檔案橋接寫入；git 提交要在你的終端機執行。
+
+## S7（介面）的交接（2026-11-09）
+
+### S7 做了什麼
+
+- **介面**：設計在 `docs/05_介面設計.md`。啟動 `python run.py`（或 `start.bat`）後，在瀏覽器裡就能走完一章：專案頁開啟／新建（可複製範例）→ 第 N 章：原著 → 規劃 → 劇本 → 分鏡 → 出圖（點縮圖選圖、裁切）→ 頁面（即時嵌字預覽、輸出 PNG）→ 嵌字頁微調。章節頁頂端有「整章批次」。視覺聖經頁：草稿確認入庫、卡片編輯（原文引文並排）、新增卡片、定裝圖出圖與挑選。
+- 程式：核心 `t2c/workspace.py`、`t2c/render.py`、`t2c/gpu.py`；後端 `server/`（`project_api.py`、`bible_api.py`、`tasks.py`、`common.py`）；前端 `web/static/` 的 `common.js`、`project.js`、`chapter.js`、`storyboard.js`、`panels.js`、`pages.js`、`bible.js`（`letter.js` 只改成預設用目前專案）。
+- **VRAM 排程**：任務排隊、一次一個；用本機 LLM 前請 ComfyUI 卸模型（`/free`）；出圖前偵測到 llama-server 還在執行就暫停詢問（「已關閉，繼續／照樣出圖／停止」）。用 DeepSeek 時不會問。
+- 測試 `tests/test_ui.py` 13 項；全部 249 項在雲端 Linux 通過。
+- **瀏覽器實測（雲端，假服務）**：用假的 ComfyUI（照提示詞的框畫出簡圖）＋假的 llama.cpp（OpenAI 相容串流＋`/health`），以 Playwright 實際點介面：從範例新建專案 → 整章出圖（遇到 VRAM 詢問）→ 選圖、裁切 → 頁面預覽與輸出；另一個專案刪掉劇本與分鏡後按「整章批次」，看到模型輸出串流、規劃→劇本→分鏡→（詢問）→出圖→頁面全部完成；視覺聖經頁與卡片頁、嵌字頁都正常顯示，沒有主控台錯誤。
+
+### S7 的決定
+
+- **目前的專案存在瀏覽器**（`FE.store`），每個 API 都帶 `project`；後端不記狀態。
+- **人改的檔案只擋「編譯不了」**：分鏡要能 `compile_chapter()` 才存；外觀字、字數、和劇本不一致等列成提醒。LLM 的輸出仍然全部要過（規則 6 不變）。定案卡片有錯就擋（分鏡要用）。
+- **加畫**：seed 仍由格 id 決定，從候選編號 0 往上找沒畫過的，所以可重現、不覆蓋。「同 seed 重畫」才會覆蓋那一張。
+- 挑圖、裁切按了就存；分鏡、劇本、原著、卡片按「存檔」才存（有未存修改時離開頁面會問）。
+- 順手修了 `compose.candidates()`：帶出圖預設後綴的候選（`_draft`）原本沒列出。
+- 沒做：介面設定金鑰與 `config.json`、用量費用、自動卸載 llama.cpp、分鏡拖曳改格序（都記在 backlog）。
+
+### 待決問題
+
+（承接 S1–S6 的 1–11 項，見下方）
+
+12. （S7）出圖前「本機 LLM 還在執行」的判斷：`config.json` 裡網址是 localhost 的 provider，`/health` 有回應就算。如果你平常讓 llama-server 一直開著、但用 DeepSeek 寫文字，每次出圖都會被問一次——要不要改成「只在這個任務用過本機 LLM 才問」？
+13. （S7）整章批次的出圖只補「沒畫過的候選」；要不要在批次裡也提供「每格加畫 N 張」？
+
+### 沒有驗證的
+
+- **Windows 上用真的 ComfyUI、DeepSeek／llama.cpp 走一章**：請照 `docs/qa/S7_介面驗收.md`。雲端只用假服務驗過。
+- Windows 上的 `pytest`、Edge／Chrome 的實際操作手感（拖框、裁切）。
+- S5、S6 留下的項目照舊（GPU 定裝圖、真的 DeepSeek 抽取與改編）。
+
+### 流程提醒
+
+- 這台電腦沒有 shell 可用時，檔案透過檔案橋接寫入；git 提交要在你的終端機執行。
+
+## 之前的階段
+
+### S6 做了什麼（2026-11-08）
 
 - **流程**：掃描（逐章，LLM）→ 合併證據 → 逐人成卡（LLM）→ 人確認 → `accept`（先過規則檢查）→ 定裝圖工作（ComfyUI）→ 比較表 → `pick` → 服裝矩陣。命令列 `tools/bible.py`（子命令 `extract/scan/draft/check/accept/sheet/contact/pick/status`），說明見 `python tools\bible.py -h`。
 - 程式：`t2c/bible_check.py`（純規則）、`t2c/bible_prompts.py`（提示詞）、`t2c/bible.py`（流程）。設計說明 `docs/04_提示詞設計.md` 第 7 節；格式 `docs/02_資料格式.md` 第 3、13 節。
@@ -53,8 +142,6 @@
 ### 流程提醒
 
 - 這台電腦沒有 shell 可用時，檔案透過檔案橋接寫入；git 提交要在你的終端機執行。
-
-## 之前的階段
 
 ### S5 做了什麼（2026-11-08）
 
@@ -145,7 +232,6 @@
 - 沒有中文斷詞：長句的斷欄只靠標點與評分。範例的兩句長台詞已用 `\n` 分句；S5 要讓 LLM 自己加 `\n`。
 - 預設字級對話 9 pt、旁白 8.5 pt（254 dpi 時 32／30 px）。
 
-## 下一階段：S7 介面
+## 下一階段：M1 里程碑驗收
 
-先讀：本檔 → `docs/00_階段計畫.md` 的 S7 → `docs/01_架構與流程.md` → `app.py`、`web/`（現有「嵌字」頁的寫法）→ `CLAUDE.md` 第 4 節（fekit 規則）。
-S7 標 Opus 5.5／high（設計）＋Sonnet 5.5／medium（實作）。聖經的草稿確認、定裝圖挑選（見 backlog）也要在這一階段進介面。建議開工前先完成 S5、S6 的「沒有驗證的」項目（真的 DeepSeek 跑一章、定裝圖出圖），介面要擺哪些按鈕才有依據。
+先讀：本檔 → `docs/00_階段計畫.md` 的 M1。要另開對話、不能讓做的人自己驗：從一章小說到 PDF 全流程，檢查 `CLAUDE.md` 的架構規則與 `docs/02_資料格式.md` 的格式是否被遵守，結果寫進 `docs/qa/M1.md`。需要在 Windows 上用真的 ComfyUI 與 DeepSeek 走一遍（S1–S8 留下的「沒有驗證的」項目都在這裡收）。

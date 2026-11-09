@@ -1,5 +1,31 @@
 # 更新紀錄
 
+## 0.8.0 — 2026-11-09（S8：輸出）
+
+- 新增 `t2c/export.py`（只用標準函式庫與 Pillow）：已輸出的 `pages/chNNN/pNNN.png` → PDF 或 CBZ，整章或單頁，輸出到專案的 `out/`（不進版控）。格式見 `docs/02_資料格式.md` 第 15 節。
+  - **PDF**：自己寫檔（Pillow 的 PDF 輸出不能設閱讀方向）。`/ViewerPreferences << /Direction /R2L >>`、預設雙頁檢視（`/PageLayout /TwoPageRight`，第 1 頁單獨在右）、`/Lang`、`/Title`；頁面大小由 PNG 的 dpi 換算（B5＝515.9×728.5 pt）；內頁預設 JPEG 品質 90，可調或無損（Flate）。
+  - **CBZ**：頁面 PNG 原檔＋ `ComicInfo.xml`（`Manga` = `YesAndRightToLeft`、第 1 頁 `FrontCover`、每頁寬高）。
+  - 不重新組版：缺頁就報錯（一次列出缺的頁碼）；PNG 比分鏡、選圖、嵌字舊時列提醒；同樣輸入產生同樣位元組；寫完才換名，不會留下半個檔。
+- 新增 `tools/export.py`（`--format pdf|cbz|all`、`--page`、`--out`、`--quality`、`--lossless`、`--single`）。
+- 介面：「頁面」分頁加「整章 PDF／整章 CBZ／這頁 PDF」下載與「PDF 用單頁檢視開啟」；頁面沒輸出齊時按鈕停用並說明。新增 `GET /api/chapter/export`，`GET /api/chapter/pages` 多回傳 `export`（`docs/05_介面設計.md`）。
+- 測試：新增 `tests/test_export.py` 22 項（解析 PDF 的 xref 與頁序、右翻旗標、無損像素、CBZ 與 ComicInfo、可重現、缺頁／壞圖／提醒、命令列）、`tests/test_ui.py` 1 項（下載）。雲端 Linux 以 poppler 實際轉出 PDF 的頁面，頁序與內容正確，`qpdf --check` 無錯。
+
+## 0.7.0 — 2026-11-09（S7：介面）
+
+- **介面**（`docs/05_介面設計.md`）：
+  - 專案頁：開啟（路徑或瀏覽）、最近開過、新建（空白或複製範例，可連同範例出圖）、章節表（各階段有沒有檔案、出圖與選圖進度）、視覺聖經摘要、環境檢查（ComfyUI 與 VRAM、各模型的金鑰、本機 LLM 是否在執行）。
+  - 章節頁分頁：原著（貼上、從檔案匯入）、規劃（表格檢視、重新產生、進階改 JSON）、劇本（Markdown 檢視與編輯、只重寫某頁、忠實度報告）、分鏡（一頁一張表；點一格開編輯區：欄位、在格子比例的畫布上拖角色／物件／狀聲詞框與對話框位置、即時編譯的 MOSS 提示詞；換模板、加頁）、出圖（候選縮圖點選即選圖、裁切焦點與放大即時預覽、整章／整頁／一格出圖、加畫 N 張、同 seed 重畫、出圖預設）、頁面（即時嵌字預覽、輸出 PNG、到嵌字頁微調）。
+  - 「整章批次」：規劃 → 劇本 → 分鏡 → 出圖 → 輸出頁面，已有的檔案跳過，可勾「重做」。
+  - 視覺聖經頁：草稿清單與一鍵確認入庫、卡片編輯（卡片原文與「待確認／原文依據」並排、存檔即檢查）、新增卡片（規劃裡缺卡的人物一鍵建立）、定裝圖出圖、加畫與挑選、改了定案卡片會提醒定裝圖過期。
+  - 嵌字頁沒帶專案時用目前開啟的專案。
+- **VRAM 排程**（`t2c/gpu.py`）：任務排隊、一次一個；呼叫本機 LLM 前請 ComfyUI 卸下模型（`POST /free`）；出圖前若本機 llama-server 還在執行（`GET /health`），任務暫停詢問「已關閉，繼續／照樣出圖／停止」。
+- 新增核心模組（只用標準函式庫、PyYAML、Pillow）：`t2c/workspace.py`（總覽、新建專案、原著／規劃／劇本／分鏡的讀寫與檢查、每格出圖狀態、選圖、加畫用的 seed）、`t2c/render.py`（逐格出圖，介面用；可停止、有進度事件）、`t2c/gpu.py`。
+- 新增 `server/`（API 與背景任務）：`project_api.py`、`bible_api.py`、`tasks.py`、`common.py`；`app.py` 只組起來並保留嵌字端點。拿掉 S0 的示範端點（`/api/hello`、`/api/demo-task`）。
+- **加畫的 seed**：仍由格 id 決定，從候選編號 0 往上找還沒畫過的（`workspace.next_seeds`），所以可重現、不覆蓋舊圖。
+- **修正**：`compose.candidates()` 沒列出帶出圖預設後綴的候選（`…_s123_draft.png`），和它的說明不符；現在會列出。
+- 人在介面改的分鏡：先過 `compile_chapter()`（不過就擋），其他檢查列成提醒；劇本、原著、草稿卡照存並回報檢查結果；定案卡片有錯就擋。資料格式沒有改變。
+- 測試：新增 `tests/test_ui.py` 13 項（假模型、假 ComfyUI、假本機伺服器）；`test_smoke.py` 改成不依賴示範端點。雲端 Linux 全部 249 項通過。
+
 ## 0.6.0 — 2026-11-08（S6：視覺聖經）
 
 - 新增 `t2c/bible_check.py`（純規則）：`look_en` 必須英文、≥ 6 字、有性別與年齡字，不得含服裝／表情／動作字；服裝要有 `default`、以 `He/She/They wears` 開頭、人稱與 `look_en` 一致；地點不得有人物字。掃描結果每條外觀事實要附原文逐字引文，對不上就丟掉。

@@ -11,9 +11,10 @@
 
   PAGES.letter = async (ctx) => {
     const q = ctx.query;
+    if (!q.project && !T2C.need(ctx, "嵌字")) return;
     const st = {
-      project: q.project || "",
-      chapter: parseInt(q.chapter || "1", 10) || 1,
+      project: q.project || T2C.project(),
+      chapter: parseInt(q.chapter || String(FE.store.get("chapter", 1) || 1), 10) || 1,
       page: parseInt(q.page || "1", 10) || 1,
       plan: null,
       pages: [],
@@ -23,7 +24,7 @@
       busy: 0,
       timer: null,
     };
-    ctx.crumbs([{ label: "首頁", href: "#/" }, { label: "嵌字" }]);
+    ctx.crumbs([{ label: "專案", href: "#/" }, { label: `第 ${st.chapter} 章`, href: FE.hash("chapter", st.chapter, { tab: "pages" }) }, { label: `嵌字（第 ${st.page} 頁）` }]);
 
     const data = await FE.api("/api/letter/plan", { query: { project: st.project, chapter: st.chapter, page: st.page }, signal: ctx.signal });
     st.project = data.project;

@@ -26,21 +26,14 @@ def test_index_has_token_and_app_name():
     assert 'name="fe-app" content="text2comics"' in html
 
 
-def test_hello():
-    assert client.get("/api/hello", params={"name": "測試"}).json() == {"message": "你好，測試！"}
+def test_info():
+    assert client.get("/api/info").json()["version"]
 
 
 def test_post_without_token_is_rejected():
-    response = client.post("/api/demo-task")
+    response = client.post("/api/task/pages", json={"project": "x", "chapter": 1})
     assert response.status_code == 403
     assert response.json()["code"] == "bad_token"
-
-
-def test_post_with_token_starts_a_task():
-    response = client.post("/api/demo-task", headers={"X-FE-Token": token()})
-    assert response.status_code == 200
-    assert response.json()["id"]
-    app_module.runner.stop_all()
 
 
 def test_index_is_not_served_without_token():
