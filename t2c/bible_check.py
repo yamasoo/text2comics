@@ -11,6 +11,7 @@
 """
 import re
 
+from . import look
 from .check import CJK
 from .project import ID_RE
 from .script import Issue
@@ -108,6 +109,65 @@ def check_character_look(look_en, label):
     return issues
 
 
+def check_sections(card, label):
+    """分段卡片（sections）：每一段只寫永久外觀，服裝放 outfits、固定的配件放 accessory。
+    性別／年齡／頭髮改成「整張卡加起來要有」（舊的 look_en 是一句話裡就要有）。"""
+    issues = []
+    parts = look.sections(card)
+    for name in look.SECTIONS:
+        for phrase in parts.get(name, ()):
+            where = _where(label, "sections.%s" % name)
+            if CJK.search(phrase):
+                issues.append(Issue("error", where, "要寫英文（生圖提示詞用英文），目前含有中文：「%s」" % phrase[:30]))
+                continue
+            found = _hits(phrase, EXPRESSION_WORDS + POSE_WORDS)
+            if found:
+                issues.append(Issue("error", where, "「%s」是表情或動作，不是固定外觀；請刪掉（表情與姿勢寫在分鏡的 expression／pose）" % "、".join(found)))
+            if name != "accessory":
+                found = _hits(phrase, CLOTHING_WORDS)
+                if found:
+                    issues.append(Issue("error", where, "「%s」是服裝；服裝寫進 outfits（上著／下著／套裝），固定配件放 sections.accessory" % "、".join(found)))
+    if not parts:
+        return [Issue("error", label, "sections 是空的：至少要有 head")]
+    text = look.look_en(card)
+    n = len(words(text))
+    if n < MIN_LOOK_WORDS:
+        issues.append(Issue("error", label, "整張卡的外觀只有 %d 個字，太短：至少要有年齡、性別、髮型髮色、眼睛或臉部特徵、體型" % n))
+    elif n > WARN_LOOK_WORDS:
+        issues.append(Issue("warn", label, "整張卡的外觀有 %d 個字，偏長；越長越容易互相打架，建議 %d 字內" % (n, WARN_LOOK_WORDS)))
+    if gender(text) is None:
+        issues.append(Issue("error", label, "sections 要明確寫出性別（woman／man／girl／boy 其中一個，通常放 head）：編譯時依它決定多角色時左右句的 She／He"))
+    if not AGE.search(text):
+        issues.append(Issue("error", label, "sections 缺少年齡（例如 a 19-year-old、an elderly；通常放 head）"))
+    if not HAIR.search(" ".join(parts.get("head", ()))):
+        issues.append(Issue("warn", _where(label, "sections.head"), "沒有提到頭髮（髮型、髮色，或 bald）；髮型是辨識角色最重要的線索"))
+    return issues
+
+
+def check_outfit_parts(parts, label, oid):
+    """新格式的服裝：{top: […], bottom: […], set: […], notes: 中文說明}。"""
+    where = _where(label, "outfits.%s" % oid)
+    if not isinstance(parts, dict):
+        return [Issue("error", where, "要寫成 {top: […], bottom: […], set: […]} 或一句英文（舊格式）")]
+    issues = []
+    unknown = sorted(k for k in parts if k not in look.OUTFIT_PARTS and k != "notes")
+    if unknown:
+        issues.append(Issue("error", where, "不認得的欄位：%s（只接受 top、bottom、set、notes）" % "、".join(unknown)))
+    total = 0
+    for name in look.OUTFIT_PARTS:
+        for item in look._phrases(parts.get(name)):
+            total += 1
+            if CJK.search(item):
+                issues.append(Issue("error", _where(where, name), "要寫英文，目前含有中文：「%s」" % item[:30]))
+                continue
+            found = _hits(item, OUTFIT_FORBIDDEN)
+            if found:
+                issues.append(Issue("error", _where(where, name), "「%s」是表情或動作，不屬於服裝；只寫穿什麼（顏色、款式、配件）" % "、".join(found)))
+    if not total:
+        issues.append(Issue("error", where, "至少要有一項：top（上著）、bottom（下著）或 set（一整套的名稱）"))
+    return issues
+
+
 def check_outfits(outfits, look_en, label):
     issues = []
     if outfits is None:
@@ -121,6 +181,9 @@ def check_outfits(outfits, look_en, label):
         where = _where(label, "outfits.%s" % oid)
         if not ID_RE.match(str(oid)):
             issues.append(Issue("error", where, "服裝 id「%s」只能用 a-z、0-9、底線、連字號" % oid))
+        if isinstance(sentence, dict):                 # 新格式：{top: […], bottom: […], set: […]}
+            issues += check_outfit_parts(sentence, label, oid)
+            continue
         if not isinstance(sentence, str) or not sentence.strip():
             issues.append(Issue("error", where, "不能是空的：寫一句英文，例如 He wears …"))
             continue
@@ -168,8 +231,11 @@ def check_card(card, kind="character", label=None):
     if aliases is not None and (not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases)):
         issues.append(Issue("error", label, "aliases 要是字串清單"))
     if kind == "character":
-        issues += check_character_look(card.get("look_en"), label)
-        issues += check_outfits(card.get("outfits"), card.get("look_en"), label)
+        if look.has_sections(card):                    # 步驟 2：有 sections 就檢查分段，沒有就退回整段 look_en
+            issues += check_sections(card, label)
+        else:
+            issues += check_character_look(card.get("look_en"), label)
+        issues += check_outfits(card.get("outfits"), look.look_en(card), label)
         notes = card.get("outfit_notes")
         if notes is not None:
             if not isinstance(notes, dict):
@@ -274,7 +340,7 @@ def normalize_card(data, kind):
     """模型的成卡輸出 → (乾淨的 dict, issues)。這裡只檢查結構；內容規則交給 check_card。"""
     if not isinstance(data, dict):
         return None, [Issue("error", "", "最外層要是 JSON 物件")]
-    keys = ("id", "name", "aliases", "look_en", "summary", "invented", "conflicts")
+    keys = ("id", "name", "aliases", "look_en", "sections", "summary", "invented", "conflicts")
     if kind == "character":
         keys += ("outfits", "outfit_notes")
     card = {k: data[k] for k in keys if k in data}
@@ -283,6 +349,11 @@ def normalize_card(data, kind):
     card["aliases"] = _strings(card.get("aliases"))
     card["summary"] = str(card.get("summary") or "").strip()
     card["id"] = str(card.get("id") or "").strip()
+    if isinstance(card.get("sections"), dict):        # 分段（步驟 2）：每一段都是英文短語清單
+        card["sections"] = {str(k): [str(x).strip() for x in v if str(x).strip()]
+                            for k, v in card["sections"].items() if isinstance(v, list)}
+        if not card.get("look_en"):
+            card["look_en"] = look.look_en(card)
     if kind == "character":
         outfits = card.get("outfits")
         if isinstance(outfits, dict):

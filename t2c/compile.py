@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 
-from . import layout, styles
+from . import layout, look, styles
 
 SHOT = {
     "extreme_wide": "extreme wide establishing shot",
@@ -46,6 +46,10 @@ def _sentence(text):
     return text[:1].upper() + text[1:]
 
 
+def _digest(text):
+    return hashlib.sha1(" ".join(str(text or "").split()).encode("utf-8")).hexdigest()[:12]
+
+
 def _seed(panel_id, index, base=0):
     """同一格同一個候選編號永遠得到同一個 seed，重跑結果可重現。"""
     digest = hashlib.sha256(("%s#%d" % (panel_id, index)).encode("utf-8")).hexdigest()
@@ -74,8 +78,9 @@ def side_of_frame(box):
 
 
 def _subject(card):
-    """從 look_en 判斷用 She／He／This character（S1 實測：多角色時要寫明左右，見 docs/qa/S1_出圖實測.md）。"""
-    words = set(re.findall(r"[a-z]+", str(card.get("look_en", "")).lower()))
+    """從整段外觀判斷用 She／He／This character（S1 實測：多角色時要寫明左右，見 docs/qa/S1_出圖實測.md）。
+    外觀可能是 sections（步驟 2 起）或舊的 look_en，一律走 look.look_en()。"""
+    words = set(re.findall(r"[a-z]+", look.look_en(card).lower()))
     if words & {"woman", "girl", "female", "lady"}:
         return "She"
     if words & {"man", "boy", "male", "guy"}:
@@ -88,17 +93,16 @@ def side_sentence(card, side):
     return "%s is %s." % (_subject(card), where)
 
 
-def character_caption(card, entry, side=None):
-    """角色 item 的 caption：（多角色時的左右位置）＋聖經的 look_en（逐字）＋服裝＋這一格的姿勢、表情。"""
+def character_caption(card, entry, side=None, shot=None):
+    """角色 item 的 caption：（多角色時的左右位置）＋這一格用得上的外觀段（逐字）＋服裝＋姿勢、表情。
+    哪幾段由分鏡的 shot 決定（look.caption_parts）；舊卡片只有 look_en 時就是整段。"""
     parts = [side_sentence(card, side)] if side else []
-    parts.append(_sentence(card["look_en"]))
     outfits = card.get("outfits") or {}
     outfit_id = entry.get("outfit") or "default"
-    outfit = outfits.get(outfit_id)
-    if outfit_id != "default" and outfit is None:
-        raise KeyError("服裝「%s」不在角色「%s」的 outfits 裡" % (outfit_id, card["id"]))
-    if outfit:
-        parts.append(_sentence(outfit))          # 聖經裡寫成完整句子，例如 "She wears a navy school blazer."
+    if outfit_id != "default" and outfit_id not in outfits:
+        raise KeyError("服裝「%s」不在角色「%s」的 outfits 裡" % (outfit_id, card.get("id")))
+    for part in look.caption_parts(card, shot, outfit_id):
+        parts.append(_sentence(part["text"]))
     if entry.get("pose"):
         parts.append(_sentence(entry["pose"]))
     if entry.get("expression"):
@@ -149,7 +153,7 @@ def compile_panel(project, page, panel, template_box, settings):
             if card is None:
                 raise KeyError("地點「%s」不在 bible/locations" % panel["location"])
             location = card
-            caption.append(_sentence("Setting: " + card["look_en"]))
+            caption.append(_sentence("Setting: " + look.look_en(card)))
         caption.append(_sentence(panel.get("scene", "")))
         caption.append(cast_sentence(len(chars)))
         caption.append(NO_FRAME)
@@ -157,20 +161,25 @@ def compile_panel(project, page, panel, template_box, settings):
 
         items = []
         if location is not None:
-            items.append({"label": "object", "caption": _sentence(location["look_en"]) + " Background of the whole panel.",
+            items.append({"label": "object", "caption": _sentence(look.look_en(location)) + " Background of the whole panel.",
                           "bbox": layout.to_moss_bbox([0, 0, 1, 1], width, height)})
         seen = set()
+        shot = panel.get("shot")
+        explore, fingerprints = [], {}          # 探索用（D2）與帳單軌（D1）的指紋
         for entry in chars:
             cid = entry.get("id")
-            card = project.characters.get(cid)
-            if card is None:
-                raise KeyError("角色「%s」不在 bible/characters" % cid)
             if cid in seen:
                 raise KeyError("角色「%s」在同一格出現兩次" % cid)
             seen.add(cid)
+            card = project.characters.get(cid)
             box = entry.get("box", [0.25, 0.1, 0.75, 1])
             side = side_of_frame(layout.check_box(box)) if len(chars) >= 2 else None
-            items.append({"label": "character", "caption": character_caption(card, entry, side),
+            if card is None:                     # 還沒有卡片：照樣算人數，但沒有外觀可貼（探索用）
+                explore.append(cid)
+                continue
+            outfit_id = entry.get("outfit") or "default"
+            fingerprints[cid] = {"outfit": outfit_id, "parts": look.fingerprint(card, shot, outfit_id)}
+            items.append({"label": "character", "caption": character_caption(card, entry, side, shot),
                           "bbox": layout.to_moss_bbox(box, width, height)})
         for obj in panel.get("objects") or []:
             items.append({"label": "object", "caption": _sentence(obj["caption"]),
@@ -193,11 +202,21 @@ def compile_panel(project, page, panel, template_box, settings):
     count = int(settings.get("candidates", 1))
     seeds = list(panel.get("seeds") or [])[:count]
     seeds += [_seed(pid, i, settings.get("seed_base", 0)) for i in range(len(seeds), count)]
+    prompt = json.dumps(doc, ensure_ascii=False)
     return {
         "id": pid, "page": page["page"], "slot": panel["slot"],
         "rect_px": list(rect), "width": width, "height": height,
-        "layout": doc, "prompt": json.dumps(doc, ensure_ascii=False),
+        "layout": doc, "prompt": prompt,
         "negative": settings.get("negative", ""), "seeds": seeds,
+        "explore": sorted(explore),
+        # 帳單軌：這一格用了哪幾段、每段的指紋（卡片改了就算得出哪幾格過期）
+        "fingerprint": {
+            "style": _digest("%s|%s|%s" % (settings["style"], settings.get("meta"), settings.get("sfx"))),
+            "shot": look.shot_key(shot),
+            "characters": fingerprints,
+            "location": (_digest(look.look_en(location)) if location is not None else ""),
+            "prompt": _digest(prompt),
+        },
     }
 
 

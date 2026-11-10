@@ -17,6 +17,8 @@
   const MODELS_HINT = "同一臺 ComfyUI 一次只掛一組模型：換 profile 就要先在 ComfyUI 換成那一組的模型；專案用哪一組由 project.yaml 的 comfy_profile 決定。";
   const DL = { unet: "t2c-dl-unet", clip: "t2c-dl-clip", vae: "t2c-dl-vae", sampler: "t2c-dl-sampler", scheduler: "t2c-dl-scheduler", lora: "t2c-dl-lora" };
   const LIST_KEYS = ["unet", "clip", "vae", "lora", "sampler", "scheduler"];
+  // stage_providers 的六個鍵（t2c/settings.py 的 STAGES）中文名：環境卡的「用在」那一欄用
+  const STAGE_TEXT = { adapt: "改編規劃", script: "劇本", storyboard: "分鏡", bible: "視覺聖經", annotate: "切對話", plan: "頁數規劃" };
 
   const isDict = (value) => !!value && typeof value === "object" && !Array.isArray(value);
   const namesOf = (table) => Object.keys(table || {}).filter((key) => !key.startsWith("_"));
@@ -647,6 +649,35 @@
         block.profile ? h("span", { class: "muted t2c-small" }, "這一章用 profile：" + block.profile + (block.kind ? "（" + block.kind + "）" : "")) : null);
     }
 
+    /** 環境：ComfyUI 連不連得上、每個 provider 有沒有金鑰、設定檔在哪（原本是總覽頁的卡片）。 */
+    function envCard() {
+      let body;
+      if (envError) {
+        body = h("div", { class: "alert alert-warn" }, "讀不到環境檢查：" + envError);
+      } else if (!env || !env.comfy) {
+        body = h("p", { class: "muted" }, "沒有環境資料；按「重新檢查」再試一次。");
+      } else {
+        const block = env.comfy;
+        body = h("div", { class: "stack" },
+          h("div", { class: "row" }, block.ok ? chip("ComfyUI 已連線", "ok", block.url || "") : chip("ComfyUI 沒有回應", "warn", block.url || ""),
+            h("span", { class: "muted" }, block.url || ""), block.vram ? h("span", {}, block.vram) : null),
+          h("table", { class: "table" },
+            h("thead", {}, h("tr", {}, ["模型", "型號", "狀態", "用在"].map((t) => h("th", {}, t)))),
+            h("tbody", {}, (env.providers || []).map((p) => {
+              const used = Object.entries(env.stages || {}).filter(([, id]) => id === p.id).map(([s]) => STAGE_TEXT[s] || s);
+              const state = p.local
+                ? chip(p.running ? "執行中（佔 VRAM）" : "沒有執行", p.running ? "info" : "")
+                : chip(p.has_key ? "有金鑰" : "沒有金鑰（環境變數 " + (p.key_env || "－") + "）", p.has_key ? "ok" : "err");
+              return h("tr", {}, h("td", {}, p.name), h("td", {}, p.model || h("span", { class: "muted" }, "預設")), h("td", {}, state), h("td", {}, used.join("、") || "－"));
+            }))),
+          h("p", { class: "muted t2c-small" },
+            "設定檔：" + (env.config_path || data.path) + "；出圖預設：" + ((env.presets || []).join("、") || "（workflow 預設）") + "（預設 " + (env.default_preset || "－") + "）"));
+      }
+      return h("section", { class: "card stack" },
+        h("div", { class: "row" }, h("h2", { class: "card-title grow" }, "環境"), h("button", { class: "btn btn-sm", type: "button", onclick: () => refresh() }, "重新檢查")),
+        body);
+    }
+
     function draw() {
       adoptDefault();
 
@@ -711,6 +742,8 @@
         h("p", { class: "muted" }, "這裡改的是工具自己的 config.json（不進版控）。金鑰不會寫進任何檔案：先讀環境變數，沒有再讀系統金鑰庫（服務 " + service() + "）。"),
         h("p", { class: "muted" }, RESTART_HINT),
         note,
+
+        envCard(),
 
         h("section", { class: "card stack" },
           h("h2", { class: "card-title" }, "語言模型（provider）"),

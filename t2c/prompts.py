@@ -14,7 +14,7 @@
 """
 import json
 
-from . import layout, styles
+from . import layout, look, styles
 from .compile import ANGLE, BUBBLE_KINDS, SHOT
 from .project import read_front_matter
 from .script import ANGLE_WORDS, MARKS, MAX_BUBBLES, OFFSCREEN_MARKS, RADIO_MARKS, SHOT_WORDS
@@ -57,7 +57,7 @@ def bible_block(project, with_body=True, with_look=True):
         if outfits:
             parts.append("服裝 id：" + "、".join(outfits))
         if with_look:
-            parts.append("外觀（只供辨識性別年齡，禁止在 scene／pose 複述）：" + _clip(card.get("look_en"), 160))
+            parts.append("外觀（只供辨識性別年齡，禁止在 scene／pose 複述）：" + _clip(look.look_en(card), 160))
         lines.append("- " + "｜".join(parts))
         if with_body:
             body = card_summary(read_front_matter(card["_path"])[1]) if card.get("_path") else ""
@@ -67,7 +67,7 @@ def bible_block(project, with_body=True, with_look=True):
         lines.append("（沒有角色卡）")
     lines += ["", "## 地點（只能用這些 id；沒有合適的就省略 location）"]
     for lid, card in project.locations.items():
-        lines.append("- id=%s｜名稱：%s｜%s" % (lid, card.get("name", lid), _clip(card.get("look_en"), 120)))
+        lines.append("- id=%s｜名稱：%s｜%s" % (lid, card.get("name", lid), _clip(look.look_en(card), 120)))
     if not project.locations:
         lines.append("（沒有地點卡）")
     return "\n".join(lines)

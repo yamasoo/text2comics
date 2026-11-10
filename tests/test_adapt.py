@@ -196,7 +196,6 @@ def _bad(mutate):
     (lambda p: p[0].__setitem__("scene", "曉雨坐在屋頂。"), "要寫英文"),
     (lambda p: p[0].__setitem__("scene", "A girl with long black hair sits."), "外觀只能由視覺聖經"),
     (lambda p: p[0]["characters"][0].__setitem__("pose", "She wears a red coat"), "服裝"),
-    (lambda p: p[0]["characters"][0].__setitem__("id", "nobody"), "不在 bible/characters"),
     (lambda p: p[0]["characters"][0].__setitem__("outfit", "swimsuit"), "沒有服裝"),
     (lambda p: p[0]["characters"][0].__setitem__("box", [0.5, 0.5, 0.4, 0.9]), "左上小於右下"),
     (lambda p: p[0]["characters"][0].__setitem__("box", [100, 200, 300, 400]), "0–1"),
@@ -223,7 +222,7 @@ def test_storyboard_errors_are_reported(mutate, expect):
 def test_all_errors_reported_at_once():
     def many(p):
         p[0]["scene"] = "中文"
-        p[3]["characters"][0]["id"] = "nobody"
+        p[3]["characters"][0]["outfit"] = "swimsuit"
         p[4]["bubbles"][0]["text"] = "改掉的台詞"
     text = _bad(many)
     assert "第 1 頁第 1 格" in text and "第 1 頁第 4 格" in text and "第 1 頁第 5 格" in text

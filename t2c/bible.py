@@ -26,7 +26,7 @@ from pathlib import Path
 
 import yaml
 
-from . import bible_check as bc
+from . import bible_check as bc, look
 from . import bible_prompts as bp
 from . import comfy, layout, llm
 from .compile import compile_chapter
@@ -216,17 +216,151 @@ def _fold(text, indent, width=96):
     return "\n".join(" " * indent + l for l in lines)
 
 
+# ---------------------------------------------------------------------------
+# 舊卡片（只有 look_en）→ 分段草稿：文字規則先拆，人再看過
+# ---------------------------------------------------------------------------
+BODY_WORDS = ("build", "frame", "physique", "height", "tall", "short stature", "lean", "slim", "slender",
+              "athletic", "muscular", "stocky", "sturdy", "compact", "petite", "heavy-set", "lanky", "wiry")
+UPPER_WORDS = ("shoulder", "shoulders", "clavicle", "chest", "bust", "arms", "arm")
+LOWER_WORDS = ("waist", "hips", "hip", "legs", "leg", "thighs", "thigh", "knees")
+ACCESSORY_WORDS = ("glasses", "spectacles", "earring", "earrings", "necklace", "pendant", "hairpin", "hair clip",
+                   "watch", "bracelet", "ring", "piercing", "choker", "bandana")
+HEAD_WORDS = ("hair", "haired", "eyes", "eye", "face", "facial", "jaw", "chin", "cheek", "cheeks", "brow", "brows",
+               "eyebrow", "eyebrows", "nose", "lips", "mouth", "teeth", "beard", "mustache", "moustache", "skin",
+               "complexion", "scar", "mole", "freckles", "bald", "shaved", "ponytail", "bun", "braid", "bangs",
+               "fringe", "crew cut", "mohawk", "man", "woman", "boy", "girl", "male", "female")
+TOP_WORDS = bc.CLOTHING_WORDS[:bc.CLOTHING_WORDS.index("skirt")] if "skirt" in bc.CLOTHING_WORDS else bc.CLOTHING_WORDS
+BOTTOM_WORDS = ("skirt", "trousers", "pants", "jeans", "shorts", "boots", "shoes", "sneakers", "socks",
+                "leggings", "sandals", "trainers")
+
+
+def _clauses(text):
+    """把一句外觀拆成短語：切逗號與連接詞（and／with／over），去掉開頭冠詞與句尾句號。
+    「A 34-year-old woman with short black hair」→「A 34-year-old woman」「short black hair」。"""
+    out = []
+    for chunk in re.split(r"[,;]|\s+(?:and|with|over|plus)\s+", str(text or "")):
+        chunk = " ".join(chunk.split()).strip(" .")
+        chunk = re.sub(r"^(?:a|an|the)\s+", "", chunk, flags=re.I)
+        if chunk:
+            out.append(chunk)
+    return out
+
+
+def _part_of(clause):
+    """這一個短語屬於哪一段（用字判斷；判斷不到就放 head，外觀文字大多是臉部特徵）。"""
+    words = set(re.findall(r"[a-z-]+", clause.lower()))
+    if words & set(ACCESSORY_WORDS):
+        return "accessory"
+    if words & set(BODY_WORDS):
+        return "body"
+    if words & set(UPPER_WORDS):
+        return "upper"
+    if words & set(LOWER_WORDS):
+        return "lower"
+    return "head"
+
+
+def split_look(card):
+    """舊卡片（只有 look_en／整句服裝）→ 分段草稿 {"sections", "outfits", "notes"}。
+    這是**文字規則**拆的，不是模型：拆完請人看過再按「儲存分段」。分不出來的短語一律放 head。"""
+    card = card or {}
+    sections = {name: [] for name in look.SECTIONS}
+    for clause in _clauses(look.look_en(card)):
+        sections[_part_of(clause)].append(clause)
+    outfits = {}
+    notes = card.get("outfit_notes") or {}
+    for oid in (card.get("outfits") or {}):
+        fit = look.outfit(card, oid)
+        entry = {"top": [], "bottom": [], "set": [], "notes": str(notes.get(oid) or fit.get("notes") or "").strip()}
+        if fit["sentence"]:
+            sentence = re.sub(r"^(he|she|they)\s+(wears?|is wearing|are wearing)\s+", "", fit["sentence"], flags=re.I)
+            for clause in _clauses(sentence):
+                words = set(re.findall(r"[a-z-]+", clause.lower()))
+                entry["bottom" if words & set(BOTTOM_WORDS) else "top"].append(clause)
+        else:
+            for name in look.OUTFIT_PARTS:
+                entry[name] = list(fit["parts"].get(name) or ())
+            entry["set"] = list(fit["parts"].get("set") or ())
+        outfits[oid] = entry
+    return {"sections": {k: v for k, v in sections.items() if v}, "outfits": outfits,
+            "note": "這是用文字規則拆的草稿（不是模型），請看過、改過再按「儲存分段」；分不出來的短語放在 head。"}
+
+
+def apply_sections(project, kind, cid, sections=None, outfits=None, draft=False, write=True):
+    """分段編輯器存檔：把 sections／outfits 寫回卡片的 frontmatter，本文照舊。
+    回 {"path", "text", "issues", "stale"}；stale＝定案卡片的外觀改了，挑好的定裝圖要重畫重挑。"""
+    path = cards_dir(project, kind, drafts=draft) / ("%s.md" % cid)
+    if not path.is_file():
+        raise BibleError("找不到卡片：%s" % path)
+    meta, body = read_front_matter(path)
+    before = card_signature(meta, "")
+    if sections is not None:
+        if not isinstance(sections, dict):
+            raise BibleError("sections 要是 {段名: [英文短語…]}")
+        unknown = sorted(k for k in sections if k not in look.SECTIONS)
+        if unknown:
+            raise BibleError("不認得的段名：%s（可用：%s）" % ("、".join(unknown), "、".join(look.SECTIONS)))
+        meta["sections"] = {name: list(look._phrases(sections.get(name))) for name in look.SECTIONS
+                            if look._phrases(sections.get(name))}
+        meta.pop("look_en", None)                       # 有 sections 就不必再留舊的整段（look.look_en 會接起來）
+    if outfits is not None:
+        if not isinstance(outfits, dict) or not outfits:
+            raise BibleError("outfits 要是 {服裝 id: {top: […], bottom: […], set: […], notes: 中文}}")
+        meta["outfits"] = {str(oid): {name: list(look._phrases((value or {}).get(name))) for name in look.OUTFIT_PARTS
+                                      if look._phrases((value or {}).get(name))}
+                           | ({"notes": str((value or {}).get("notes")).strip()} if (value or {}).get("notes") else {})
+                           for oid, value in outfits.items()}
+        meta.pop("outfit_notes", None)
+    meta.pop("_path", None)
+    issues = bc.check_card(meta, kind)
+    text = render_card(meta, body, status=str(meta.get("status") or ("draft" if draft else "confirmed")))
+    picked = load_picks(project).get("characters" if kind == "character" else "locations", {}).get(cid)
+    stale = bool((not draft) and picked and before != card_signature(meta, ""))
+    if write:
+        path.write_text(text, encoding="utf-8")
+    return {"path": str(path), "text": text, "issues": issues, "stale": stale}
+
+
+def _list_block(items, indent):
+    return ["%s- %s" % (" " * indent, _q(item)) for item in items]
+
+
 def render_card(card, body="", status="draft"):
-    """卡片 → Markdown（YAML frontmatter＋人看的本文）。look_en、outfits 用折疊區塊，和範例卡的寫法一樣好讀。"""
+    """卡片 → Markdown（YAML frontmatter＋人看的本文）。
+    有 sections 就寫分段（步驟 2），沒有就寫整段 look_en（舊寫法）；服裝同樣支援兩種格式。"""
     out = ["---", "id: %s" % card["id"], "name: %s" % _q(card["name"]), "aliases: [%s]" % ", ".join(_q(a) for a in card.get("aliases") or []),
-           "status: %s" % status, "look_en: >-", _fold(card["look_en"], 2)]
-    if card.get("outfits"):
+           "status: %s" % status]
+    parts = look.sections(card)
+    if parts:
+        out.append("sections:")
+        for name in look.SECTIONS:
+            items = parts.get(name) or ()
+            out.append("  %s:%s" % (name, "" if items else " []"))
+            out += _list_block(items, 4)
+    else:
+        out += ["look_en: >-", _fold(card.get("look_en") or "", 2)]
+    outfits = card.get("outfits") or {}
+    if outfits:
         out.append("outfits:")
-        for oid, sentence in card["outfits"].items():
-            out += ["  %s: >-" % oid, _fold(sentence, 4)]
-    if card.get("outfit_notes"):
+        for oid in outfits:
+            fit = look.outfit(card, oid)
+            if fit["sentence"]:
+                out += ["  %s: >-" % oid, _fold(fit["sentence"], 4)]
+                continue
+            out.append("  %s:" % oid)
+            for name in look.OUTFIT_PARTS:
+                items = fit["parts"].get(name) or ()
+                if not items and name != "top":
+                    continue
+                out.append("    %s:%s" % (name, "" if items else " []"))
+                out += _list_block(items, 6)
+            if fit["notes"]:
+                out.append("    notes: %s" % _q(fit["notes"]))
+    legacy_notes = {oid: t for oid, t in (card.get("outfit_notes") or {}).items()
+                    if oid not in outfits or look.outfit(card, oid)["legacy"]}
+    if legacy_notes:
         out.append("outfit_notes:")
-        out += ["  %s: %s" % (oid, _q(text)) for oid, text in card["outfit_notes"].items()]
+        out += ["  %s: %s" % (oid, _q(t)) for oid, t in legacy_notes.items()]
     out += ["---", "", body.strip(), ""]
     return "\n".join(out)
 
@@ -693,8 +827,9 @@ def load_picks(project):
 
 
 def card_signature(card, outfit=""):
-    """look_en（與該套服裝）的指紋。挑圖時記下來；之後 look_en 或服裝改了，狀態會標成「已過期」，提醒要重畫、重挑。"""
-    return hashlib.sha1(("%s|%s" % (str(card.get("look_en") or "").strip(), (card.get("outfits") or {}).get(outfit, "") if outfit else "")).encode("utf-8")).hexdigest()[:10]
+    """外觀（sections 或 look_en）與該套服裝的指紋。挑圖時記下來；之後改了，狀態會標成「已過期」，提醒要重畫、重挑。"""
+    fit = json.dumps(look.outfit(card, outfit) if outfit else {}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(("%s|%s" % (look.look_en(card), fit)).encode("utf-8")).hexdigest()[:10]
 
 
 def pick(project, image, cid=None, outfit=None):

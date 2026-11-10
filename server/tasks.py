@@ -4,22 +4,25 @@
 任務的 result 帶 {"text", "refresh", "project", "chapter"}，頁面用來決定要不要重新載入（docs/05_介面設計.md 第 6 節）。
 VRAM 排程（第 4 節）：呼叫本機 LLM 前請 ComfyUI 卸下模型；出圖前若本機 LLM 還在執行就暫停詢問。
 """
+import shutil
+
 from fastapi import APIRouter, Body
 
 from fekit import ApiError, JobError, JobStopped
 
-from t2c import adapt, bible, comfy, compose, gpu, layout, letter, llm, render, workspace
+from t2c import adapt, bible, comfy, compose, gpu, layout, letter, llm, render, reverse, stale, workspace
 from t2c.compile import CompileError
 from t2c.project import ProjectError
 
 from .common import CORE_ERRORS, body_project, chapter, config, runner
+from .common import project as open_project
 
 router = APIRouter()
 
-STAGE_LABEL = {"plan": "改編規劃", "script": "劇本", "storyboard": "分鏡", "scan": "掃描", "card": "成卡"}
-STAGES = ("plan", "script", "storyboard", "render", "pages")
-LLM_STAGES = ("plan", "script", "storyboard")
-STAGE_KEY = {"plan": "adapt", "script": "script", "storyboard": "storyboard"}
+STAGE_LABEL = {"annotate": "切對話", "plan": "改編規劃", "script": "劇本", "storyboard": "分鏡", "scan": "掃描", "card": "成卡"}
+STAGES = ("annotate", "plan", "script", "storyboard", "render", "pages")   # 批次依這個順序跑
+LLM_STAGES = ("annotate", "plan", "script", "storyboard")
+STAGE_KEY = {"annotate": "annotate", "plan": "adapt", "script": "script", "storyboard": "storyboard"}
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +137,14 @@ def run_adapt(job, proj, n, stage, cfg, want_pages=None, title="", only_pages=No
     prov = llm.find_provider(cfg, stage=STAGE_KEY[stage])
     job.say("%s：模型 %s（%s）" % (STAGE_LABEL[stage], prov.get("name") or prov["id"], prov.get("model") or "預設"))
     try:
-        if stage == "plan":
+        if stage == "annotate":
+            _, report = ad.run_annotate(n, title, force)
+            text = ("切對話：段落 %d／%d（%d%%）、對話逐字 %d／%d、引號台詞 %d／%d"
+                    % (report["paragraphs_used"], report["paragraphs"],
+                       round(100.0 * report["paragraphs_used"] / (report["paragraphs"] or 1)),
+                       report["dialogue_found"], report["dialogue_lines"],
+                       report["source_quotes_kept"], report["source_quotes"]))
+        elif stage == "plan":
             plan = ad.run_plan(n, want_pages, title, force)
             text = "規劃《%s》%d 頁；聖經缺少的人物：%s" % (plan["title"], len(plan["pages"]), "、".join(plan["unlisted_characters"]) or "無")
         elif stage == "script":
@@ -181,12 +191,93 @@ def start_adapt(body: dict = Body(...)):
     proj, n = body_project(body), chapter(body.get("chapter"))
     stage = body.get("stage")
     if stage not in LLM_STAGES:
-        raise ApiError(400, "stage 要是 plan、script、storyboard 其中之一", "bad_stage")
+        raise ApiError(400, "stage 要是 %s 其中之一" % "、".join(LLM_STAGES), "bad_stage")
     pages = int(body["pages"]) if body.get("pages") else None
     page = int(body["page"]) if body.get("page") else None
     title = "第 %d 章：%s%s" % (n, STAGE_LABEL[stage], "（第 %d 頁）" % page if page else "")
     return runner.start(adapt_task, str(proj.root), n, stage, pages, str(body.get("title") or ""), page, bool(body.get("force")),
                         kind="adapt", title=title).summary()
+
+
+# ---------------------------------------------------------------------------
+# 反推設定（N5／步驟 4）：整本掃描 → 成卡草稿，斷點續跑
+# ---------------------------------------------------------------------------
+def reverse_task(job, root, upto=None, min_chapters=None, budget=None, force=False):
+    proj = workspace.open_project(root)
+    cfg = config_or_fail()
+    free_for_llm(job, cfg, ["bible"])
+    rep = Reporter(job)
+
+    def on_event(ev):
+        kind = ev.get("kind")
+        if kind == "plan":
+            job.say("① 計畫：%d 章、%d 批%s" % (ev.get("chapters") or 0, ev.get("batches") or 0,
+                                         "（已完成 %d 章，這次跳過）" % ev["skipped"] if ev.get("skipped") else ""))
+            job.set(progress=(0, max(1, ev.get("batches") or 1)))
+        elif kind == "batch":
+            job.set(phase="streaming", progress=(ev.get("index", 0) - 1, max(1, ev.get("total") or 1)),
+                    note="掃描 %s" % (ev.get("label") or ""))
+            job.say("② 第 %d／%d 批：%s" % (ev.get("index") or 0, ev.get("total") or 0, ev.get("label") or ""))
+        elif kind == "saved" and ev.get("chapters"):
+            job.say("　存檔：%s" % ev.get("path"), "dim")
+        elif kind == "drafts":
+            rare = ev.get("rare") or []
+            job.say("③ 草稿 %d 張%s" % (ev.get("total") or 0, "；出現章數太少沒成卡：%s" % "、".join(rare) if rare else ""))
+        elif kind == "stopped":
+            job.say("已停止（這次掃描 %d 章）" % (ev.get("scanned") or 0), "warn")
+        else:
+            rep.event(ev)                    # call／delta／fix 由 Reporter 顯示
+        job.checkpoint()
+
+    rev = reverse.Reverser(proj, prov_for=lambda key: llm.find_provider(cfg, stage=key),
+                           should_stop=lambda: job.stopping, on_event=on_event, budget=budget or 32768,
+                           force=force, min_chapters=min_chapters)
+    try:
+        result = rev.run(upto)
+    except llm.Cancelled:
+        rep.close()
+        job.checkpoint()
+        raise JobStopped()
+    except (reverse.ReverseError, bible.BibleError, llm.LLMError, ProjectError) as error:
+        rep.close()
+        _fail(error)
+    rep.close()
+    u = rev.usage
+    text = "反推：掃描 %d 章、跳過 %d 章、草稿 %d 張%s" % (
+        result["scanned"], result["skipped"], len(result["drafts"]),
+        "；沒成卡：%s" % "、".join(result["rare"]) if result.get("rare") else "")
+    job.say("呼叫 %d 次，約 %d 個輸入／%d 個輸出 token" % (u["calls"], u["prompt_tokens"], u["completion_tokens"]), "dim")
+    return {"text": text, "project": str(proj.root), "refresh": ["bible"], "reverse": result}
+
+
+@router.post("/api/task/reverse")
+def start_reverse(body: dict = Body(...)):
+    proj = body_project(body)
+    upto = int(body["upto"]) if body.get("upto") else None
+    min_chapters = int(body["min_chapters"]) if body.get("min_chapters") else None
+    budget = int(body["budget"]) if body.get("budget") else None
+    return runner.start(reverse_task, str(proj.root), upto, min_chapters, budget, bool(body.get("force")),
+                        kind="bible", title="反推設定：掃描原著＋成卡草稿").summary()
+
+
+@router.get("/api/bible/reverse")
+def reverse_state(project: str = ""):
+    """反推的進度（build/reverse/state.json）與目前累積到的章數、草稿數。"""
+    proj = open_project(project)
+    folder = proj.root / "build" / "reverse"
+    state, accumulated = {}, {}
+    try:
+        import json as _json
+        if (folder / "state.json").is_file():
+            state = _json.loads((folder / "state.json").read_text(encoding="utf-8"))
+        if (folder / "accumulated.json").is_file():
+            accumulated = _json.loads((folder / "accumulated.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state, accumulated = {}, {}
+    drafts = bible.list_drafts(proj)
+    return {"state": state, "chapters": list(accumulated.get("chapters") or []),
+            "batches": sorted(p.name for p in (folder / "batches").glob("*.json")) if (folder / "batches").is_dir() else [],
+            "drafts": sorted(drafts), "folder": str(folder)}
 
 
 # ---------------------------------------------------------------------------
@@ -231,25 +322,64 @@ def run_render(job, proj, n, cfg, jobs, preset=None, force=False, profile=None):
     return counts["render"], counts["skip"]
 
 
-def render_task(job, root, n, page=None, panel=None, more=0, seed=None, preset=None, force=False, profile=None):
+def _backup_candidates(proj, n, jobs, preset, default_preset, profile, default_profile):
+    """覆蓋前把會被蓋掉的候選圖複製到 build/render/backup/<章>/（build/ 不進版控；同名就覆蓋舊備份）。
+
+    只備份這次真的要畫的 seed 所對應的檔名，其他預設／profile 的候選不動。回傳備份張數。
+    """
+    source_dir = compose.renders_dir(proj, n)
+    if not source_dir.is_dir():
+        return 0
+    target_dir = proj.out_dir("build", "render", "backup", compose.chapter_name(n))
+    saved = 0
+    for job in jobs:
+        for seed in (job["run_seeds"] if "run_seeds" in job else job["seeds"]):
+            name = comfy.render_name(job["id"], seed, preset, default_preset, profile, default_profile)
+            source = source_dir / name
+            if source.is_file():
+                shutil.copy2(source, target_dir / name)
+                saved += 1
+    return saved
+
+
+def render_task(job, root, n, page=None, panel=None, more=0, seed=None, preset=None, force=None, profile=None, stale_only=False):
+    """出圖。force=None 表示呼叫端沒指定：一般出圖維持原本的「已存在的候選不覆蓋」，
+    只重畫過期格時預設覆蓋同一批 seed（卡片改了，這批圖就是要換成新的；picks 指到的檔名不變）。"""
     proj = workspace.open_project(root)
     cfg = config_or_fail()
+    overwrite = bool(force)
     try:
         prof = render.resolve_profile(cfg, proj, profile)
         default_profile = comfy.default_profile_name(cfg)
         jobs = render.chapter_jobs(proj, n, page=page, panel=panel)
+        if stale_only:                   # 只留過期的格（t2c/stale.py）
+            wanted = {row["id"] for row in stale.chapter(proj, n)}
+            jobs = [j for j in jobs if j["id"] in wanted]
         chosen, _, default = render.resolve_preset(cfg, preset, prof)
-        if more:
+        explicit_add = bool(more) or seed is not None      # 呼叫端明確要加畫／指定 seed：照他的意思
+        if more:                         # 加畫 N 張：新 seed、新檔名，舊的候選留著
             render.plan_more(proj, n, jobs, int(more), chosen, default, prof["name"], default_profile)
         elif seed is not None:
             for j in jobs:
                 j["run_seeds"] = [int(seed)]
-            force = True
+            overwrite = True
+        if stale_only and force is None and not explicit_add:
+            overwrite = True             # 只說 stale：用同一批 seed 覆蓋（舊圖先備份）
     except CORE_ERRORS as error:
         _fail(error)
+    if stale_only and not jobs:
+        job.say("沒有過期的格，不用重畫")
+        return _result("沒有過期的格，不用重畫", proj, n, ["panels"])
+    if stale_only and overwrite:
+        saved = _backup_candidates(proj, n, jobs, chosen, default, prof["name"], default_profile)
+        if saved:
+            job.say("舊候選先備份：build/render/backup/%s/（%d 張）" % (compose.chapter_name(n), saved), "dim")
     job.say("出圖 profile：%s（%s）；出圖預設：%s" % (prof["name"], prof["kind"], chosen or "（workflow 預設）"))
     wait_llm_released(job, cfg)
-    done, skipped = run_render(job, proj, n, cfg, jobs, chosen, force, prof["name"])
+    done, skipped = run_render(job, proj, n, cfg, jobs, chosen, overwrite, prof["name"])
+    if stale_only and overwrite:
+        return _result("重畫 %d 格（%d 張，舊候選備份在 build/render/backup/%s/）"
+                       % (len(jobs), done, compose.chapter_name(n)), proj, n, ["panels"])
     return _result("新出 %d 張，略過 %d 張（已存在）" % (done, skipped), proj, n, ["panels"])
 
 
@@ -260,10 +390,13 @@ def start_render(body: dict = Body(...)):
     panel = str(body.get("panel") or "") or None
     more = max(0, min(int(body.get("more") or 0), 8))
     seed = int(body["seed"]) if body.get("seed") not in (None, "") else None
+    stale_only = bool(body.get("stale"))
+    force = None if body.get("force") is None else bool(body.get("force"))   # 沒指定就讓 render_task 自己決定
     what = panel or ("第 %d 頁" % page if page else "整章")
-    title = "第 %d 章出圖：%s%s" % (n, what, "（加畫 %d 張）" % more if more else "（重畫 seed %d）" % seed if seed is not None else "")
-    return runner.start(render_task, str(proj.root), n, page, panel, more, seed, body.get("preset") or None, bool(body.get("force")),
-                        str(body.get("profile") or "") or None, kind="render", title=title).summary()
+    title = "第 %d 章出圖：%s%s%s" % (n, what, "（只重畫過期的格）" if stale_only else "",
+                                     "（加畫 %d 張）" % more if more else "（重畫 seed %d）" % seed if seed is not None else "")
+    return runner.start(render_task, str(proj.root), n, page, panel, more, seed, body.get("preset") or None, force,
+                        str(body.get("profile") or "") or None, stale_only, kind="render", title=title).summary()
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +454,7 @@ def start_pages(body: dict = Body(...)):
 # ---------------------------------------------------------------------------
 # 整章批次
 # ---------------------------------------------------------------------------
-BATCH_LABEL = {"plan": "改編規劃", "script": "劇本", "storyboard": "分鏡", "render": "出圖", "pages": "輸出頁面"}
+BATCH_LABEL = {"annotate": "切對話", "plan": "改編規劃", "script": "劇本", "storyboard": "分鏡", "render": "出圖", "pages": "輸出頁面"}
 
 
 def batch_task(job, root, n, stages, force=False, preset=None, want_pages=None, profile=None):
@@ -332,7 +465,8 @@ def batch_task(job, root, n, stages, force=False, preset=None, want_pages=None, 
         job.item(stage, label=BATCH_LABEL[stage], state="pending")
     job.set(progress=(0, len(stages)))
     llm_todo = [s for s in stages if s in LLM_STAGES]
-    paths = {"plan": proj.plan_path(n), "script": proj.script_path(n), "storyboard": proj.storyboard_path(n)}
+    paths = {"annotate": proj.scenes_path(n), "plan": proj.plan_path(n), "script": proj.script_path(n),
+             "storyboard": proj.storyboard_path(n)}
     need_llm = [s for s in llm_todo if force or not paths[s].is_file()]
     if need_llm:
         free_for_llm(job, cfg, [STAGE_KEY[s] for s in need_llm])

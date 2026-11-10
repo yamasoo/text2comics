@@ -85,16 +85,21 @@ def scan_messages(chapter_label, chapter_text, known_names=(), notes_block=""):
 # ---------------------------------------------------------------------------
 # ② 成卡
 # ---------------------------------------------------------------------------
-LOOK_RULES = """## look_en（固定外觀）的規則
-- 一句英文（約 25–45 字）：**年齡、性別、種族或膚色、髮型與髮色、眼睛與臉部特徵、體型**，永久的特徵（疤痕、痣、眼鏡）可以寫。
-- 例：A 22-year-old East Asian man with short, slightly unruly black hair, a square jaw, thick eyebrows and a lean, athletic build
+LOOK_RULES = """## sections（固定外觀，分五段）的規則
+每一段是**英文短語清單**（不是句子、不加句號），只放永久特徵：
+- head（頭部）：年齡、性別、種族或膚色、髮型與髮色、眼睛與臉部特徵。**每張卡都要有 head**，性別（woman／man／girl／boy）與年齡放這裡。
+- body（身形）：體型、身高、骨架。
+- upper（上半身）：鎖骨、肩線這類上半身的身體詞。
+- lower（下半身）：腰、臀、腿這類下半身的身體詞。
+- accessory（飾品）：眼鏡、耳環、項鍊、髮飾這類**固定**配件（會換的放 outfits）。
+- 例：head 放 ["A 22-year-old East Asian man", "short, unruly black hair", "a square jaw", "thick eyebrows"]、body 放 ["a lean, athletic build"]。
 - **不准寫**：
-  - 服裝與配件：%(clothing)s
+  - 服裝：%(clothing)s
   - 表情與情緒：%(expression)s
   - 動作與姿勢：%(pose)s
   這些會被程式擋下。服裝寫進 outfits，表情與動作由分鏡決定。
-- 性別一定要寫（woman／man／girl／boy 其中一個），年齡一定要寫。
-- 這一句會**逐字貼進每一格**，之後不會再改，所以只放「一眼認得出這個人」的特徵，不要寫成人物介紹。""" % {
+- 分鏡的特寫只貼 head、中景貼 head＋upper＋accessory、全身與遠景多貼 body 與 lower，所以 head 要能單獨成立（一眼認得出這個人）。
+- 這幾段會**逐字貼進提示詞**，之後不會再改。""" % {
     "clothing": _words(bc.CLOTHING_WORDS), "expression": _words(bc.EXPRESSION_WORDS), "pose": _words(bc.POSE_WORDS)}
 
 CHARACTER_RULES = """# 任務：角色卡
@@ -102,27 +107,26 @@ CHARACTER_RULES = """# 任務：角色卡
 
 ## 資料的優先順序
 1. 小說原文的證據（looks、outfits；每條都有引文）。
-2. 作者的設定檔（若有；可能含給別的繪圖模型用的標籤，把它們當成「作者想要的外觀」轉成英文句子）。
+2. 作者的設定檔（若有；可能含給別的繪圖模型用的標籤，把它們當成「作者想要的外觀」轉成英文短語）。
 3. 兩者衝突時**以原文為準**，並把衝突寫進 conflicts（一項一句中文：哪個欄位、設定怎麼寫、原文怎麼寫、你採用哪個），讓作者決定。
 4. 必要欄位（年齡、性別、種族或膚色、髮型髮色、眼睛、體型）證據裡沒有時，**用平實、容易畫出辨識度的預設補上**，並逐項列在 invented（一項一句中文：補了什麼、為什麼）。種族或膚色沒有線索時，依姓名的文化背景補。不要補花俏或戲劇化的特徵。
 
 """ + LOOK_RULES + """
 
 ## outfits（服裝）的規則
-- 物件 {服裝id: 英文完整句}，**一定要有 default**（最常穿的那套）。服裝 id 用英文小寫、底線，例如 work_coveralls、dress_uniform。
-- 每一句**以 He wears／She wears 開頭**（和 look_en 的性別一致），寫穿什麼（顏色、款式、配件），整句會被貼進該格。
+- 物件 {服裝id: {top: […], bottom: […], set: […], notes: 中文說明}}，**一定要有 default**（最常穿的那套）。服裝 id 用英文小寫、底線，例如 work_coveralls、dress_uniform。
+- top（上著）、bottom（下著）、set（一整套的名字，例如 school uniform）：每一項是英文短語，寫顏色與款式，例如 "navy school blazer"、"grey pleated skirt"；不要寫成句子、不要寫表情或動作。
+- 分鏡的特寫不貼服裝、中景貼 top、全身與遠景貼 top＋bottom，大遠景連 set 一起貼。
 - 只記**明顯不同的套裝**；髒了、捲起袖子、拉上拉鍊不算另一套。證據只有一種穿著就只給 default。
-- 不准寫表情與動作。
-- outfit_notes：{服裝id: 中文一句話，說明什麼時候穿（可寫章節）}。
+- notes 寫中文一句話，說明什麼時候穿（可寫章節）。
 
 ## 輸出格式（只輸出這個 JSON）
 {
   "id": "小寫英文 id，用姓名的漢語拼音（例如 chen_jiahe）；只能用 a-z、0-9、底線、連字號",
   "name": "顯示名稱",
   "aliases": ["別名"],
-  "look_en": "英文固定外觀",
-  "outfits": {"default": "He wears …"},
-  "outfit_notes": {"default": "中文：什麼時候穿"},
+  "sections": {"head": ["…"], "body": ["…"], "upper": [], "lower": [], "accessory": []},
+  "outfits": {"default": {"top": ["…"], "bottom": ["…"], "set": [], "notes": "中文：什麼時候穿"}},
   "summary": "中文一到兩句：這個人是誰、在故事裡做什麼（給人看的）",
   "invented": ["補上的、原文沒寫的項目"],
   "conflicts": ["設定與原文衝突的項目"]
@@ -130,9 +134,12 @@ CHARACTER_RULES = """# 任務：角色卡
 
 EXAMPLE_CHARACTER = {
     "id": "jie", "name": "阿杰", "aliases": [],
-    "look_en": "A 22-year-old East Asian man with short, unruly black hair, a square jaw, thick eyebrows and a lean, athletic build",
-    "outfits": {"default": "He wears a faded gray hooded sweatshirt over a white T-shirt, dark jeans and worn white sneakers."},
-    "outfit_notes": {"default": "日常穿著（第 1 章起）"},
+    "sections": {
+        "head": ["A 22-year-old East Asian man", "short, unruly black hair", "a square jaw", "thick eyebrows"],
+        "body": ["a lean, athletic build"],
+        "upper": [], "lower": [], "accessory": [],
+    },
+    "outfits": {"default": {"top": ["a faded gray hooded sweatshirt", "a white T-shirt"], "bottom": ["dark jeans", "worn white sneakers"], "set": [], "notes": "日常穿著（第 1 章起）"}},
     "summary": "愛逞強的大學生，常忘了帶傘。",
     "invented": ["年齡與種族（原文沒寫，依姓名補）", "方下巴與粗眉（為了好辨識而補）"], "conflicts": []}
 

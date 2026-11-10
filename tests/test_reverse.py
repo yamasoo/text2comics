@@ -297,6 +297,23 @@ def test_two_chapters_keep_the_two_chapter_rule(two_chapters):
     assert sorted(x.stem for x in (two_chapters.root / "bible" / "drafts" / "characters").glob("*.md")) == ["jie", "qing"]
 
 
+def test_min_chapters_flag_lets_one_chapter_characters_become_cards(two_chapters):
+    """造卡捷徑（D1）：--min-chapters 1 讓只出現一章的配角也成卡（預設仍要 2 章）。"""
+    boss_card = {"id": "laobanniang", "name": "老闆娘", "aliases": [],
+                 "sections": {"head": ["A 45-year-old East Asian woman", "short permed black hair"],
+                              "body": ["a sturdy build"]},
+                 "outfits": {"default": {"top": ["a red apron over a white shirt"], "bottom": ["dark trousers"]}},
+                 "summary": "小吃店老闆娘。", "invented": ["年齡（原文沒寫）"], "conflicts": []}
+    fake = Fake(scans=[("## 本章：第01章", SCAN1_BOSS), ("## 本章：第02章", SCAN2)],
+                cards=CARDS + [("老闆娘", boss_card)])
+    rev, fake = reverser(two_chapters, fake)
+    result = rev.run(min_chapters=1)
+    assert result["drafts"] == ["jie", "qing", "laobanniang", "arcade"] and result["rare"] == []
+    assert len(fake.calls) == 6                                        # 2 次掃描 ＋ 4 張卡（多了老闆娘）
+    names = sorted(x.stem for x in (two_chapters.root / "bible" / "drafts" / "characters").glob("*.md"))
+    assert "laobanniang" in names                                      # 只出現第 1 章的老闆娘也成卡了
+
+
 # ---- 草稿 → 定案 → 編譯 -------------------------------------------------------------
 def test_accepted_drafts_compile_into_a_one_panel_page(proj):
     rev, _ = reverser(proj)

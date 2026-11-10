@@ -66,8 +66,8 @@
     /** 沒開專案時顯示提示並回傳 false。 */
     need(ctx, label) {
       if (T2C.project()) return true;
-      ctx.crumbs([{ label: "專案", href: "#/" }, { label }]);
-      ctx.view(h("div", { class: "empty" }, "還沒有開啟漫畫專案。", " ", h("a", { href: "#/" }, "到專案頁開啟或新建")));
+      ctx.crumbs([{ label: "開啟專案", href: "#/projects" }, { label }]);
+      ctx.view(h("div", { class: "empty" }, "還沒有開啟漫畫專案。", " ", h("a", { href: "#/projects" }, "開啟專案"), " 或 ", h("a", { href: "#/new" }, "新建專案")));
       return false;
     },
 
@@ -99,7 +99,7 @@
       return h("input", Object.assign({ type: "number", class: "t2c-num", value: value === undefined || value === null ? "" : value }, opts));
     },
 
-    label: { plan: "規劃", script: "劇本", storyboard: "分鏡", render: "出圖", pages: "頁面" },
+    label: { annotate: "切對話", plan: "規劃", script: "劇本", storyboard: "分鏡", render: "出圖", pages: "頁面" },
     shot: { extreme_wide: "大遠景", wide: "遠景", full: "全身", medium: "中景", close: "近景", extreme_close: "特寫" },
     angle: { eye: "平視", high: "俯視", low: "仰視", bird: "鳥瞰", dutch: "斜角", over_shoulder: "過肩" },
     kind: { speech: "對話", thought: "心聲", shout: "喊叫", whisper: "悄悄話", radio: "通訊（電子音）", narration: "旁白" },
@@ -107,7 +107,7 @@
 
   /** 整章批次的對話框。 */
   T2C.batchDialog = function (chapter, env) {
-    const stages = ["plan", "script", "storyboard", "render", "pages"];
+    const stages = ["annotate", "plan", "script", "storyboard", "render", "pages"];
     const boxes = {};
     const presets = (env && env.presets) || [];
     const preset = h("select", {}, presets.map((p) => h("option", { value: p, selected: p === (env && env.default_preset) }, p)));
@@ -119,7 +119,7 @@
         h("p", { class: "muted" }, "依序執行勾選的階段；已經有的檔案會跳過。用本機 LLM 時，文字端跑完會先請你關掉 llama-server 釋放 VRAM，再開始出圖。"),
         h("div", { class: "stack t2c-tight" }, stages.map((s) => h("label", { class: "check" },
           (boxes[s] = h("input", { type: "checkbox", checked: true })), T2C.label[s] === "頁面" ? "輸出頁面（組版＋嵌字）" : T2C.label[s]))),
-        h("label", { class: "check" }, force, "重做已有的規劃、劇本、分鏡（會覆蓋；出圖永遠只補沒畫過的）"),
+        h("label", { class: "check" }, force, "重做已有的切對話、規劃、劇本、分鏡（會覆蓋；出圖永遠只補沒畫過的）"),
         h("div", { class: "row" }, h("label", { class: "row t2c-inline" }, "規劃頁數", pages),
           presets.length ? h("label", { class: "row t2c-inline" }, "出圖預設", preset) : null)),
       foot: (done) => [

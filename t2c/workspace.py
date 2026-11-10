@@ -491,6 +491,10 @@ def save_storyboard(project, n, doc):
     except CompileError as error:
         raise WorkspaceError("分鏡無法編譯，沒有存檔：%s" % error)
     issues = storyboard_issues(project, n, board)
+    for job in compile_chapter(project, board):          # 探索用（D2）：缺卡不算錯誤，但要講清楚哪幾格是探索用
+        if job.get("explore"):
+            issues.append(sc.Issue("warn", "第 %s 頁第 %s 格" % (job["page"], job["slot"]),
+                                "探索用：角色 %s 還沒有卡片，這一格不進選圖／頁面／過期清單" % "、".join(job["explore"])))
     path = project.storyboard_path(n)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(board, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

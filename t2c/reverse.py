@@ -123,13 +123,14 @@ class Reverser:
     """
 
     def __init__(self, project, prov=None, prov_for=None, should_stop=None, on_event=None,
-                 budget=32768, out_reserve=8192, force=False, sources=None, chat_json=None):
+                 budget=32768, out_reserve=8192, force=False, sources=None, chat_json=None, min_chapters=None):
         if prov is None and prov_for is None:
             raise ReverseError("需要指定 provider（prov 或 prov_for）")
         self.project = project
         self.should_stop, self.on_event = should_stop, on_event
         self.budget, self.out_reserve = int(budget), int(out_reserve)
         self.force = bool(force)
+        self.min_chapters = int(min_chapters) if min_chapters else None
         self.sources = list(sources) if sources else None
         self.builder = bible.Builder(project, prov=prov, prov_for=prov_for, should_stop=should_stop,
                                      on_event=on_event, chat_json=chat_json)
@@ -174,11 +175,13 @@ class Reverser:
         return doc.get("sha1") == hashlib.sha1(str(source.get("text") or "").encode("utf-8")).hexdigest()
 
     # --- 跑一輪 -------------------------------------------------------------
-    def run(self, upto=None):
+    def run(self, upto=None, min_chapters=None):
         """跑到第 upto 章（預設全部）。回傳 {"chapters", "batches", "scanned", "skipped", "drafts", "rare"}：
         chapters 是這次認定的章數、batches 是實際跑完的批數、scanned 是這次處理的章數、
         skipped 是已完成而跳過的章數、drafts 是這次寫出的草稿 id、rare 是出現章數太少而沒成卡的名字。
         被 should_stop 叫停就回傳完成的部分。"""
+        if min_chapters is not None:
+            self.min_chapters = int(min_chapters)
         sources = self.all_sources()
         by_no = {int(s["n"]): s for s in sources}
         if not by_no:
@@ -229,7 +232,8 @@ class Reverser:
             usable = len({int(n) for n in acc["chapters"]
                           if int(n) in by_no and int(n) <= upto and self._has_scan(by_no[int(n)])})
             try:
-                report = self.builder.draft(force=self.force, min_chapters=min(2, usable))
+                threshold = self.min_chapters or min(2, usable)          # --min-chapters 可以讓只出現一章的配角也成卡
+                report = self.builder.draft(force=self.force, min_chapters=threshold)
             except llm.Cancelled:
                 stopped, report = True, {"drafted": [], "rare": []}
             drafts = [cid for _kind, cid, _path in report["drafted"]]

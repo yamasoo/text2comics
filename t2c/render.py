@@ -100,7 +100,12 @@ def render_jobs(project, chapter, jobs, cfg, preset_name=None, force=False, shou
     stop = should_stop or (lambda: False)
     from .compile import save_job
     for job in jobs:
-        save_job(build, job)
+        # 只為「真的會畫」的格記指紋：全部略過（force=False 且檔案都在）時還寫指紋，
+        # 會讓過期清單以為圖已經跟新卡片一致（舊圖還在、清單卻變 0 格）。
+        seeds = job["run_seeds"] if "run_seeds" in job else job["seeds"]
+        names = [comfy.render_name(job["id"], seed, chosen, default, profile["name"], default_profile) for seed in seeds]
+        if force or any(not (folder / name).exists() for name in names):
+            save_job(build, job)
     for i, (job, seed) in enumerate(todo, 1):
         if stop():
             raise Cancelled()

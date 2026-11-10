@@ -140,13 +140,21 @@ def test_seeds_are_reproducible():
     assert first == second
 
 
-def test_unknown_character_reports_page_and_panel():
+def test_unknown_character_becomes_explore_panel():
+    """步驟 2（D2）：還沒建卡的角色可以先出圖，那一格標成探索用；地點打錯還是錯誤。"""
     project, board = sample()
     board = copy.deepcopy(board)
-    board["pages"][0]["panels"][0]["characters"][0]["id"] = "nobody"
+    panel = board["pages"][0]["panels"][0]
+    panel["characters"].append({"id": "nobody", "box": [0.6, 0.1, 0.9, 0.9]})       # 多一個還沒建卡的人
+    jobs = compile_chapter(project, board)
+    job = next(j for j in jobs if j["id"] == panel["id"])
+    assert job["explore"] == ["nobody"]
+    assert "nobody" not in job["fingerprint"]["characters"]                          # 沒有卡片就沒有外觀指紋
+    assert "nobody" not in json.dumps(job["layout"])                                 # 也不會被貼進提示詞
+    board["pages"][0]["panels"][0]["location"] = "moon"
     with pytest.raises(CompileError) as error:
         compile_chapter(project, board)
-    assert "第 1 頁第 1 格" in str(error.value) and "nobody" in str(error.value)
+    assert "第 1 頁第 1 格" in str(error.value) and "moon" in str(error.value)
 
 
 def test_slot_count_must_match_template():

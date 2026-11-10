@@ -1,9 +1,9 @@
-// 章節頁（#/chapter/:n?tab=…）：頂端是章名、各階段狀態與「整章批次」；分頁：原著、規劃、劇本、分鏡、出圖、頁面。
+// 章節頁（#/chapter/:n?tab=…）：頂端是章名、各階段狀態與「整章批次」；分頁：原著、切對話、規劃、劇本、分鏡、出圖、頁面。
 // 分鏡、出圖、頁面三個分頁在 storyboard.js、panels.js、pages.js（T2C.tabs.<key>）。
 (function () {
   "use strict";
   const { h, PAGES } = FE;
-  const TABS = [["source", "原著"], ["plan", "規劃"], ["script", "劇本"], ["storyboard", "分鏡"], ["panels", "出圖"], ["pages", "頁面"]];
+  const TABS = [["source", "原著"], ["annotate", "切對話"], ["plan", "規劃"], ["script", "劇本"], ["storyboard", "分鏡"], ["panels", "出圖"], ["pages", "頁面"]];
   // 任務結束時，哪些分頁要重新載入
   const REFRESH = { plan: ["plan"], script: ["script", "plan"], storyboard: ["storyboard", "script"], panels: ["panels", "render", "storyboard"], pages: ["pages", "panels", "render"] };
   T2C.tabs = T2C.tabs || {};
@@ -15,7 +15,7 @@
     if (st.storyboard_pages !== null) return st.rendered < st.panels ? "panels" : st.picked < st.panels ? "panels" : "pages";
     if (st.script_pages !== null) return "script";
     if (st.plan_pages !== null) return "plan";
-    return "source";
+    return "annotate";     // 有原著、還沒規劃：下一個要做的階段就是切對話
   }
 
   function stageChips(st) {
@@ -37,7 +37,7 @@
     const st = overview.chapters.find((c) => c.chapter === n) || null;
     const tab = TABS.some(([k]) => k === ctx.query.tab) ? ctx.query.tab : defaultTab(st);
     const numbers = overview.chapters.map((c) => c.chapter);
-    ctx.crumbs([{ label: `《${overview.title}》`, href: "#/" }, { label: `第 ${n} 章` }, { label: TABS.find(([k]) => k === tab)[1] }]);
+    ctx.crumbs([{ label: `《${overview.title}》`, href: "#/project" }, { label: `第 ${n} 章` }, { label: TABS.find(([k]) => k === tab)[1] }]);
 
     const body = h("div", { class: "tab-panel" });
     const prev = numbers.filter((x) => x < n).pop();
@@ -106,6 +106,56 @@
         h("button", { class: "btn btn-primary", type: "button", onclick: save }, "存檔")),
       editor,
       data.exists ? h("div", { class: "row" }, h("a", { class: "btn", href: FE.hash("chapter", n, { tab: "plan" }) }, "下一步：改編規劃 →")) : null));
+  };
+
+  /* ──────────────── 切對話 ──────────────── */
+  const LINE_TYPE = { narration: "旁白", dialogue: "對話", action: "演出" };
+
+  T2C.tabs.annotate = async (ctx, body, { n, status, overview }) => {
+    const [data] = await Promise.all([T2C.get("/api/chapter/scenes", { chapter: n }, ctx), FE.md.load()]);
+    T2C.onJobEnd(ctx, (job, r) => { if ((r.refresh || []).includes("annotate") && !FE.dirty.is()) FE.route(); });
+    const names = Object.fromEntries((((overview || {}).bible || {}).characters || []).map((c) => [c.id, c.name]));
+    const generate = async (force) => {
+      const ok = await FE.confirm(force
+        ? `重新切一份要呼叫語言模型，而且會覆蓋 ${data.path}（你手改過的部分也會蓋掉）。`
+        : "切對話要呼叫語言模型：它把這一章切成幾場，再把每一句分成旁白、對話、演出。要開始嗎？",
+        { ok: force ? "覆蓋並重新切" : "開始切對話", danger: !!force });
+      if (!ok) return;
+      T2C.run("/api/task/adapt", { chapter: n, stage: "annotate", force });
+    };
+    const genBtn = h("button", { class: data.exists ? "btn" : "btn btn-primary", type: "button", onclick: () => generate(!!data.exists) },
+      data.exists ? "重新切一份（覆蓋）" : "產生切對話（模型）…");
+
+    if (!data.exists) {
+      body.replaceChildren(h("div", { class: "stack" },
+        status && status.source_chars !== null
+          ? h("p", {}, "小說 → 場 → 旁白／對話／演出：語言模型把這一章切成幾場，每一句都回指原著的段落。台詞逐字保留，漏掉的句子程式會自動補回來。")
+          : h("div", { class: "alert alert-warn" }, "還沒有原著：先到「原著」分頁貼上這一章。"),
+        h("div", { class: "row" }, genBtn)));
+      return;
+    }
+
+    const doc = data.scenes || {};
+    const scenes = doc.scenes || [];
+    const sceneBlock = (scene, index) => {
+      const lines = (scene && scene.lines) || [];
+      return h("details", { class: "card card-flat", open: index === 0 },
+        h("summary", {}, h("b", {}, `第 ${index + 1} 場`), (scene && scene.title) ? `　${scene.title}` : "", " ", T2C.chip(`${lines.length} 行`)),
+        h("ul", { class: "stack t2c-tight" }, lines.map((line) => h("li", { class: "row t2c-tight" },
+          T2C.chip(LINE_TYPE[line.type] || line.type, line.type === "dialogue" ? "ok" : ""),
+          line.speaker ? h("span", {}, names[line.speaker] || line.speaker) : null,
+          h("span", { class: "grow" }, line.text),
+          typeof line.source_para === "number" ? h("span", { class: "muted t2c-small" }, `原文第 ${line.source_para} 段`) : null))));
+    };
+
+    body.replaceChildren(h("div", { class: "stack" },
+      h("div", { class: "row" },
+        h("h2", { class: "t2c-h2" }, doc.title ? `《${doc.title}》` : "切對話"),
+        h("span", { class: "muted t2c-small grow" }, `${scenes.length} 場　${data.path}`),
+        genBtn),
+      data.fidelity ? h("details", { class: "card card-flat" }, h("summary", {}, "忠實度報告"), FE.md.render(data.fidelity)) : null,
+      scenes.map(sceneBlock),
+      h("div", { class: "row" }, h("a", { class: "btn btn-primary", href: FE.hash("chapter", n, { tab: "plan" }) }, "下一步：改編規劃 →"))));
   };
 
   /* ──────────────── 規劃 ──────────────── */

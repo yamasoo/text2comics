@@ -105,7 +105,7 @@ def run(args):
     rev = reverse.Reverser(proj, prov_for=prov_for, sources=sources, budget=args.budget, out_reserve=OUT_RESERVE,
                            force=args.force, on_event=lambda event: show(event, out))
     started = time.monotonic()
-    result = rev.run(args.upto)
+    result = rev.run(args.upto, min_chapters=args.min_chapters)
     print("跑完：第 1～%d 章，%d 章、%d 批（這次掃描 %d 章，跳過 %d 章）"
           % (upto, result["chapters"], result["batches"], result["scanned"], result["skipped"]), file=out)
     if result["drafts"]:
@@ -136,6 +136,7 @@ def parse_args(argv=None):
     ap.add_argument("--from", dest="source_from", metavar="路徑",
                     help="原著資料夾或檔案；預設讀專案的 source/")
     ap.add_argument("--dry-run", action="store_true", help="只印批次計畫，不呼叫模型、不寫任何檔案")
+    ap.add_argument("--min-chapters", type=int, default=None, help="至少出現幾章才成卡（預設 min(2, 可用章數)；1＝只出現一章的配角也成卡）")
     ap.add_argument("--provider", help="指定 provider id；預設依 stage_providers.bible／default_provider")
     ap.add_argument("--json", action="store_true", help="stdout 只印一行 JSON 摘要（進度訊息改走 stderr）")
     return ap.parse_args(argv)

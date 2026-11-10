@@ -143,7 +143,10 @@ def check_panel(project, page_no, panel):
         for key in sorted(set(entry) - CHAR_KEYS):
             issues.append(Issue("warn", where, "角色「%s」多餘的欄位「%s」已忽略" % (cid, key)))
         if cid not in project.characters:
-            issues.append(Issue("error", where, "角色「%s」不在 bible/characters（現有：%s）" % (cid, "、".join(project.characters) or "無")))
+            # 步驟 2 的 D2：還沒有卡片的角色可以先出圖，那一格標成「探索用」（不進選圖、頁面與過期清單）
+            issues.append(Issue("warn", where, "角色「%s」還沒有卡片（現有：%s）：這一格會標成探索用，不進選圖／頁面／過期清單；補上卡片後再正式出圖"
+                                % (cid, "、".join(project.characters) or "無")))
+            cast.append(cid)
             continue
         if cid in cast:
             issues.append(Issue("error", where, "角色「%s」在同一格出現兩次" % cid))

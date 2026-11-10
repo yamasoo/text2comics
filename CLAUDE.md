@@ -1,6 +1,6 @@
 # CLAUDE.md — 文字轉漫畫（text2comics）
 
-給在這個專案工作的 Claude Code／其他 AI 看的規則。新對話開始時先讀本檔，架構與流程見 `docs/01_架構與流程.md`。開發過程的交接、待辦與階段計畫不放在這個分支，在 `dev` 分支。
+給在這個專案工作的 Claude Code／其他 AI 看的規則。新對話開始時依序讀：本檔 → `docs/HANDOFF.md` → `docs/00_階段計畫.md` 中目前的階段。
 
 ## 1. 這個專案是什麼
 
@@ -12,9 +12,9 @@
 | 目錄 | 權限 | 說明 |
 |---|---|---|
 | `<專案根目錄>` | 讀寫 | 本專案 |
-| `<novel-studio 專案根>` | **唯讀** | 參考它的 ComfyUI／MOSS 出圖機制（`studio/comfy.py`、`studio/illust.py`）、LLM 連線（`studio/providers.py`）、書庫格式。開發分支是 `dev` |
-| `<text_2_visual_novel 專案根>` | **唯讀** | 之後的整合對象 |
-| `<fekit 專案根>` | **唯讀** | fekit 本體。fekit 有問題到 fekit 自己的對話修 |
+| `<Novel Studio 根目錄>` | **唯讀** | 參考它的 ComfyUI／MOSS 出圖機制（`studio/comfy.py`、`studio/illust.py`）、LLM 連線（`studio/providers.py`）、書庫格式。開發分支是 `dev` |
+| `<t2vn 根目錄>` | **唯讀** | 之後的整合對象 |
+| `<fekit 專案根>` | **唯讀** | fekit 本體。fekit 有問題記到 `docs/backlog.md`，到 fekit 自己的對話修 |
 | 其他位置 | 不碰 | — |
 
 整合階段（I2、I4）在**該專案自己的對話**、依它的 `CLAUDE.md` 進行，不在本專案的對話裡改它們。
@@ -45,12 +45,12 @@
 ## 5. 工作流程
 
 - **模型**：一律 DeepSeek。難題（資料格式、提示詞架構、整合計畫、獨立驗收）用 `deepseek-v4-pro`，其餘用 `deepseek-flash`；思考強度只有 `off`／`low`／`high`／`max`（沒有 medium、xhigh），最難的品質優先工作用 `max`。
-- **一個對話只做一個階段。** 不要順手做下一階段的事；範圍外的需求先問。
+- **一個對話只做一個階段**（見 `docs/00_階段計畫.md`）。不要順手做下一階段的事；發現範圍外的需求記到 `docs/backlog.md`。
 - 動工前確認：本階段的範圍、要讀的參考檔、驗收方式。
 - 需要 GPU 的驗收（出圖）只能在使用者的 Windows 電腦上做。不能實際出圖時，寫清楚哪些項目待使用者驗證，不要假裝驗過。
 - 結束前：
   1. 依本階段的「驗收」實際檢查（`python -m pytest tests`、開頁面、看出圖結果），不要只靠描述。
-  2. 有改資料格式就更新 `docs/02_資料格式.md` 與 `CHANGELOG.md`。
+  2. 更新 `docs/HANDOFF.md`、`docs/00_階段計畫.md` 的狀態欄；有改資料格式就更新 `docs/02_資料格式.md` 與 `CHANGELOG.md`。
   3. git：能執行就提交；不能的話，在結束報告附上可以直接貼上執行的指令。
 
 ## 6. 階段結束報告（必做）

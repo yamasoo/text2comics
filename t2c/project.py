@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from . import layout
+from . import layout, look
 
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.S)
 ID_RE = re.compile(r"^[a-z0-9_-]+$")
@@ -53,8 +53,8 @@ def _load_cards(folder, kind):
             raise ProjectError("%s：id 只能用 a-z、0-9、底線、連字號（目前是 %r）" % (path, cid))
         if cid in cards:
             raise ProjectError("%s：%s id「%s」重複了" % (path, kind, cid))
-        if not str(meta.get("look_en") or "").strip():
-            raise ProjectError("%s：缺少 look_en（固定的英文外觀描述，生圖時逐字使用）" % path)
+        if not look.look_en(meta):                # 新的卡片用 sections，舊的用 look_en（D4 的相容層）
+            raise ProjectError("%s：缺少 look_en 或 sections（固定的英文外觀描述，生圖時逐字使用）" % path)
         meta["_path"] = str(path)
         cards[cid] = meta
     return cards

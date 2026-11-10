@@ -10,7 +10,7 @@ from PIL import Image
 
 from fekit import ApiError
 
-from t2c import comfy, compose, export, gpu, importer, layout, llm, styles, workspace
+from t2c import comfy, compose, export, gpu, importer, layout, llm, render, stale, styles, workspace
 
 from .common import SAMPLE, body_project, chapter, config, guard
 from .common import project as open_project
@@ -287,6 +287,20 @@ def source_save(body: dict = Body(...)):
     return {"path": str(path)}
 
 
+# ---- 切對話（N3／步驟 3）--------------------------------------------------------
+
+@router.get("/api/chapter/scenes")
+def scenes_get(project: str = "", chapter_no: int = Query(1, alias="chapter")):
+    """scenes/chNNN.json 與忠實度報告（build/adapt/chNNN_scenes_fidelity.md）。沒有就是 scenes: null。"""
+    proj, n = _open(project), chapter(chapter_no)
+    with guard():
+        doc = proj.load_scenes(n)
+        path = proj.scenes_path(n)
+    report = proj.root / "build" / "adapt" / ("ch%03d_scenes_fidelity.md" % n)
+    text = report.read_text(encoding="utf-8") if report.is_file() else ""
+    return {"path": str(path), "scenes": doc, "fidelity": text, "exists": doc is not None}
+
+
 # ---- 規劃 ------------------------------------------------------------------------
 
 @router.get("/api/chapter/plan")
@@ -376,10 +390,17 @@ def panel_prompt(body: dict = Body(...)):
 @router.get("/api/chapter/panels")
 def panels(project: str = "", chapter_no: int = Query(1, alias="chapter"), profile: str = ""):
     """出圖分頁的資料。profile 指定時，presets／default_preset 換成那一組的（介面臨時換 profile 用），
-    project_profile 仍然是這一章的預設（project.yaml 的 comfy_profile → config.json 的 default_profile）。"""
+    project_profile 仍然是這一章的預設（project.yaml 的 comfy_profile → config.json 的 default_profile）。
+
+    每一格多兩個欄位（步驟 2）：explore 是這一格用到、但還沒有卡片的角色 id；stale 是這一格在過期清單裡。"""
     proj, n = _open(project), chapter(chapter_no)
     with guard():
         data = workspace.panels_status(proj, n)
+        jobs = render.chapter_jobs(proj, n)
+        stale_ids = {row["id"] for row in stale.chapter(proj, n, jobs=jobs)}
+    explore = {job["id"]: list(job.get("explore") or []) for job in jobs}
+    data["panels"] = [dict(row, explore=explore.get(row["id"], []), stale=row["id"] in stale_ids)
+                      for row in data["panels"]]
     cfg = config()
     chapter_profile = _project_profile(cfg, proj)
     viewed = chapter_profile

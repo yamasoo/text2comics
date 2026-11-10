@@ -1,11 +1,12 @@
-// 專案頁（#/）：開啟、新建、從範例複製；目前專案的章節表、畫風、整本匯入、視覺聖經摘要、環境檢查。
+// 專案的三個入口頁（LAYOUT A）：`#/new` 新建專案、`#/projects` 開啟專案、`#/project` 總覽。
+// 中間一次只放一件事；章節在 chapter.js，聖經、嵌字、設定各自有自己的檔。
 (function () {
   "use strict";
   const { h, PAGES } = FE;
 
   /* ──────────────── 畫風預設集（GET /api/styles） ──────────────── */
 
-  // 新建、專案頁、換畫風三個入口共用一份；頁面層級的變數，重新載入頁面才會重抓。
+  // 新建與總覽的換畫風共用一份；頁面層級的變數，重新載入頁面才會重抓。
   let stylesCache = null;
   function loadStyles(ctx) {
     if (!stylesCache) {
@@ -33,7 +34,9 @@
     return h("span", { class: done >= total ? "t2c-ok" : "" }, `${done}／${total}`);
   }
 
-  function openForm(ctx, refresh) {
+  /* ──────────────── #/projects 開啟專案 ──────────────── */
+
+  function openForm(ctx) {
     const input = h("input", { type: "text", class: "grow", placeholder: "E:\\comics\\作品名（有 project.yaml 的資料夾）", value: T2C.project() });
     const open = async (path) => {
       path = (path || input.value).trim();
@@ -41,7 +44,7 @@
       try {
         await FE.api("/api/project", { query: { project: path }, signal: ctx.signal });
         T2C.setProject(path);
-        refresh();
+        FE.go("#/project");                                             // 開完就進總覽，不在同一頁堆三個表單
       } catch (error) { FE.fail(error); }
     };
     const browse = async () => {
@@ -49,21 +52,26 @@
       if (path) { input.value = path; open(path); }
     };
     const recent = T2C.recent();
-    return h("section", { class: "card stack" },
-      h("h2", { class: "card-title" }, "開啟專案"),
-      h("div", { class: "row" }, input,
-        h("button", { class: "btn", type: "button", onclick: browse }, "瀏覽…"),
-        h("button", { class: "btn btn-primary", type: "button", onclick: () => open() }, "開啟")),
-      recent.length ? h("div", { class: "stack t2c-tight" },
-        h("div", { class: "muted" }, "最近開過："),
-        recent.map((p) => h("div", { class: "row t2c-recent" },
+    return h("div", { class: "stack" },
+      h("section", { class: "card stack" },
+        h("h2", { class: "card-title" }, "開啟一個已經存在的專案"),
+        h("div", { class: "row" }, input,
+          h("button", { class: "btn", type: "button", onclick: browse }, "瀏覽…"),
+          h("button", { class: "btn btn-primary", type: "button", onclick: () => open() }, "開啟")),
+        h("p", { class: "muted t2c-small" }, "貼上專案資料夾的路徑（裡面要有 project.yaml）。沒開過專案的話，先", h("a", { href: "#/new" }, "新建一個"), "。")),
+      recent.length ? h("section", { class: "card stack" },
+        h("h2", { class: "card-title" }, "最近開過"),
+        h("div", { class: "stack t2c-tight" }, recent.map((p) => h("div", { class: "row t2c-recent" },
           h("button", { class: ["btn btn-sm", p === T2C.project() ? "btn-primary" : "btn-ghost"], type: "button", title: p, onclick: () => open(p) },
             p.split(/[\\/]/).filter(Boolean).slice(-2).join(" / ")),
           h("button", { class: "btn btn-sm btn-ghost", type: "button", title: "從清單移除", "aria-label": "從清單移除",
-            onclick: () => { T2C.forget(p); refresh(); } }, "×")))) : null);
+            onclick: () => { T2C.forget(p); FE.route(); } }, "×")))))
+        : null);
   }
 
-  function createForm(ctx, refresh) {
+  /* ──────────────── #/new 新建專案 ──────────────── */
+
+  function createForm(ctx) {
     const path = h("input", { type: "text", class: "grow", placeholder: "新資料夾的完整路徑，例如 E:\\comics\\屋頂的便當" });
     const title = h("input", { type: "text", placeholder: "作品名" });
     const preset = h("select", { "aria-label": "畫風" }, h("option", { value: "" }, "畫風清單載入中…"));
@@ -101,25 +109,24 @@
         const data = await FE.api("/api/project/create", { body, signal: ctx.signal });
         T2C.setProject(data.root);
         FE.toast(`已建立：${data.root}`, "ok");
-        refresh();
+        FE.go("#/project");
       } catch (error) { FE.fail(error); }
     };
-    return h("details", { class: "card" },
-      h("summary", { class: "card-title" }, "新建專案"),
-      h("div", { class: "stack" },
-        h("div", { class: "row" }, path, h("button", { class: "btn", type: "button", onclick: browse }, "選上層資料夾…")),
-        h("div", { class: "row" }, h("label", { class: "check" }, mode.blank, "空白專案"),
-          h("label", { class: "check" }, mode.sample, "複製範例「屋頂的便當」（一章、兩個角色，用來試流程）"),
-          h("label", { class: "check" }, renders, "連同範例的出圖（沒有 GPU 也能走完一章）", rendersNote)),
-        h("label", { class: "field" }, "作品名", title),
-        h("label", { class: "field" }, "畫風", preset),
-        h("details", { class: "t2c-tight" },
-          h("summary", { class: "muted t2c-small" }, "自訂畫風（進階）"),
-          h("label", { class: "field" }, "自訂畫風字串（英文）", style)),
-        h("div", { class: "row" }, h("button", { class: "btn btn-primary", type: "button", onclick: create }, "建立"))));
+    return h("section", { class: "card stack" },
+      h("h2", { class: "card-title" }, "建立一個新的專案資料夾"),
+      h("div", { class: "row" }, path, h("button", { class: "btn", type: "button", onclick: browse }, "選上層資料夾…")),
+      h("div", { class: "row" }, h("label", { class: "check" }, mode.blank, "空白專案"),
+        h("label", { class: "check" }, mode.sample, "複製範例「屋頂的便當」（一章、兩個角色，用來試流程）"),
+        h("label", { class: "check" }, renders, "連同範例的出圖（沒有 GPU 也能走完一章）", rendersNote)),
+      h("label", { class: "field" }, "作品名", title),
+      h("label", { class: "field" }, "畫風", preset),
+      h("details", { class: "t2c-tight" },
+        h("summary", { class: "muted t2c-small" }, "自訂畫風（進階）"),
+        h("label", { class: "field" }, "自訂畫風字串（英文）", style)),
+      h("div", { class: "row" }, h("button", { class: "btn btn-primary", type: "button", onclick: create }, "建立")));
   }
 
-  /* ──────────────── 專案頁的畫風（POST /api/project/style） ──────────────── */
+  /* ──────────────── 總覽的畫風（POST /api/project/style） ──────────────── */
 
   function styleCard(ctx, data) {
     const cfg = data.config || {};
@@ -187,7 +194,7 @@
 
   /* ──────────────── 匯入整本切章（/api/import/plan → /api/import/commit） ──────────────── */
 
-  function importDialog(ctx, refresh) {
+  function importDialog(ctx) {
     const file = h("input", { type: "text", class: "grow", spellcheck: "false", placeholder: "小說檔的完整路徑（.txt／.md／.docx）" });
     const mode = h("select", { "aria-label": "切章方式" },
       h("option", { value: "auto" }, "自動判斷"),
@@ -329,50 +336,26 @@
         return [cancelBtn, previewBtn, commitBtn];
       },
     });
-    close.closed.then(() => { if (imported) refresh(); });
+    close.closed.then(() => { if (imported) FE.route(); });
     return close;
   }
 
-  function envCard(ctx) {
-    const box = h("div", { class: "stack" }, h("p", { class: "muted" }, "檢查中…"));
-    const load = async () => {
-      try {
-        const env = await T2C.get("/api/env", {}, ctx);
-        box.replaceChildren(
-          h("div", { class: "row" }, T2C.chip(env.comfy.ok ? "ComfyUI 已連線" : "ComfyUI 沒有回應", env.comfy.ok ? "ok" : "warn"),
-            h("span", { class: "muted" }, env.comfy.url), env.comfy.vram ? h("span", {}, env.comfy.vram) : null),
-          h("table", { class: "table" },
-            h("thead", {}, h("tr", {}, ["模型", "型號", "狀態", "用在"].map((t) => h("th", {}, t)))),
-            h("tbody", {}, env.providers.map((p) => {
-              const used = Object.entries(env.stages).filter(([, id]) => id === p.id).map(([s]) => ({ adapt: "規劃", script: "劇本", storyboard: "分鏡", bible: "聖經" })[s]);
-              const state = p.local
-                ? T2C.chip(p.running ? "執行中（佔 VRAM）" : "沒有執行", p.running ? "info" : "")
-                : T2C.chip(p.has_key ? "有金鑰" : `沒有金鑰（設環境變數 ${p.key_env}）`, p.has_key ? "ok" : "err");
-              return h("tr", {}, h("td", {}, p.name), h("td", {}, p.model || h("span", { class: "muted" }, "預設")), h("td", {}, state), h("td", {}, used.join("、") || "－"));
-            }))),
-          h("p", { class: "muted t2c-small" }, `設定檔：${env.config_path}；出圖預設：${env.presets.join("、") || "（workflow 預設）"}（預設 ${env.default_preset || "－"}）`));
-      } catch (error) {
-        if (error.name !== "AbortError") box.replaceChildren(h("div", { class: "alert alert-err" }, error.message));
-      }
-    };
-    load();
-    return h("section", { class: "card stack" },
-      h("div", { class: "row" }, h("h2", { class: "card-title grow" }, "環境"), h("button", { class: "btn btn-sm", type: "button", onclick: load }, "重新檢查")),
-      box);
-  }
+  /* ──────────────── 總覽 ──────────────── */
 
   function addChapter(chapters) {
     const next = chapters.length ? Math.max(...chapters.map((c) => c.chapter)) + 1 : 1;
     FE.go(FE.hash("chapter", next, { tab: "source" }));
   }
 
-  async function projectView(ctx, refresh) {
+  async function projectOverview(ctx) {
     let data;
     try {
       data = await FE.api("/api/project", { query: { project: T2C.project() }, signal: ctx.signal });
     } catch (error) {
       if (error.name === "AbortError") throw error;
-      return h("div", { class: "alert alert-err" }, `打不開目前的專案：${error.message}`);
+      return h("div", { class: "stack" },
+        h("div", { class: "alert alert-err" }, `打不開目前的專案：${error.message}`),
+        h("div", { class: "row" }, h("a", { class: "btn", href: "#/projects" }, "換一個專案"), h("a", { class: "btn", href: "#/new" }, "新建專案")));
     }
     const rows = data.chapters.map((c) => h("tr", {},
       h("td", { class: "num" }, h("a", { href: FE.hash("chapter", c.chapter) }, `第 ${c.chapter} 章`)),
@@ -387,11 +370,13 @@
     const b = data.bible;
     const drafts = b.drafts.character.length + b.drafts.location.length;
     return h("div", { class: "stack" },
+      h("div", { class: "row" },
+        h("h1", { class: "t2c-title grow" }, `《${data.title}》`),
+        h("button", { class: "btn", type: "button", onclick: () => importDialog(ctx) }, "匯入整本切章…"),
+        h("button", { class: "btn btn-primary", type: "button", onclick: () => addChapter(data.chapters) }, "新增一章")),
+      h("p", { class: "muted t2c-small" }, data.root),
       h("section", { class: "card stack" },
-        h("div", { class: "row" }, h("h2", { class: "card-title grow" }, `《${data.title}》`),
-          h("button", { class: "btn", type: "button", onclick: () => importDialog(ctx, refresh) }, "匯入整本切章…"),
-          h("button", { class: "btn btn-primary", type: "button", onclick: () => addChapter(data.chapters) }, "新增一章")),
-        h("p", { class: "muted t2c-small" }, data.root),
+        h("h2", { class: "card-title" }, "章節與進度"),
         data.chapters.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
           h("thead", {}, h("tr", {}, ["章", "標題", "原著", "規劃", "劇本", "分鏡", "已出圖", "已選圖", "頁面"].map((t) => h("th", {}, t)))),
           h("tbody", {}, rows)))
@@ -404,16 +389,35 @@
         drafts ? h("div", { class: "alert alert-warn" }, `有 ${drafts} 張草稿還沒確認入庫（分鏡只會用確認過的卡片）。`) : null));
   }
 
-  PAGES.home = async (ctx) => {
-    ctx.crumbs([{ label: "專案" }]);
-    const refresh = () => FE.route();
-    const main = T2C.project() ? await projectView(ctx, refresh) : h("div", { class: "empty" }, "開啟一個漫畫專案資料夾，或新建一個。第一次用可以選「複製範例」。");
+  /* ──────────────── 四個路由 ──────────────── */
+
+  // 舊的 `#/` 還留著（書籤、文件裡的連結）：直接帶到該去的地方。
+  PAGES.home = () => {
+    FE.go(T2C.project() ? "#/project" : "#/projects");
+  };
+
+  PAGES.projects = (ctx) => {
+    ctx.crumbs([{ label: "開啟專案" }]);
     ctx.view(h("div", { class: "stack t2c-page" },
-      h("h1", { class: "t2c-title" }, "文字轉漫畫"),
+      h("h1", { class: "t2c-title" }, "開啟專案"),
+      h("p", { class: "muted" }, "選一個已經存在的漫畫專案資料夾。第一次用可以先", h("a", { href: "#/new" }, "新建專案"), "並複製範例。"),
+      openForm(ctx)));
+  };
+
+  PAGES.new = (ctx) => {
+    ctx.crumbs([{ label: "新建專案" }]);
+    ctx.view(h("div", { class: "stack t2c-page" },
+      h("h1", { class: "t2c-title" }, "新建專案"),
       h("p", { class: "muted" }, "小說一章 → 改編規劃 → 漫畫劇本 → 分鏡 → MOSS-Image 逐格出圖 → 挑圖 → 嵌字 → 頁面。"),
-      main,
-      h("div", { class: "t2c-two" }, openForm(ctx, refresh), createForm(ctx, refresh)),
-      envCard(ctx)));
+      createForm(ctx)));
+  };
+
+  PAGES.project = async (ctx) => {
+    if (!T2C.need(ctx, "總覽")) return;
+    ctx.crumbs([{ label: "總覽" }]);
+    const view = await projectOverview(ctx);
+    if (!ctx.active()) return;
+    ctx.view(h("div", { class: "stack t2c-page" }, view));
     T2C.onJobEnd(ctx, (job, r) => { if (r.refresh && r.refresh.length && !FE.dirty.is()) FE.route(); });
   };
 })();

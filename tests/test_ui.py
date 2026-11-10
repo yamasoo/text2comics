@@ -136,7 +136,11 @@ def test_storyboard_save_blocks_compile_errors_only(comic):
     path, saved, issues = workspace.save_storyboard(comic, 1, board)
     assert any("wear" in i["message"] or "外觀" in i["message"] for i in issues)
     assert saved["pages"][0]["panels"][0]["id"] == "p001_k1" and json.loads(path.read_text(encoding="utf-8"))["version"] == 1
-    board["pages"][0]["panels"][1]["characters"] = [{"id": "nobody"}]                         # 編譯不了：擋
+    board["pages"][0]["panels"][1]["characters"] = [{"id": "nobody"}]                         # 缺卡：不擋，標成探索用（D2）
+    _, saved2, issues2 = workspace.save_storyboard(comic, 1, board)
+    assert saved2["pages"][0]["panels"][1]["characters"][0]["id"] == "nobody"
+    assert any(i["level"] == "warn" and "探索用" in i["message"] for i in issues2)
+    board["pages"][0]["panels"][1]["location"] = "moon"                                       # 地點打錯：還是擋
     with pytest.raises(workspace.WorkspaceError, match="第 1 頁第 2 格"):
         workspace.save_storyboard(comic, 1, board)
 
@@ -629,3 +633,126 @@ def test_project_style_api_rejects_bad_preset_and_missing_project(tmp_path):
     missing = post("/api/project/style", {"preset": "mono"})
     assert missing.status_code == 400
     assert "請先選擇" in missing.json()["error"]
+
+
+# ---- 1.8.0：LAYOUT A 的導覽（三段）、設定頁環境卡與樣式 ----------------------------
+
+STATIC = ROOT / "web" / "static"
+
+
+def static_text(name):
+    return (STATIC / name).read_text(encoding="utf-8")
+
+
+def between(text, start, end):
+    """start 之後、end 之前的片段；少了任一段就紅，訊息寫出缺的是哪一段。"""
+    assert start in text, "找不到：" + start
+    begin = text.index(start) + len(start)
+    assert end in text[begin:], "找不到：" + end
+    return text[begin:text.index(end, begin)]
+
+
+def test_static_nav_has_seven_routes():
+    """1.8.0 步驟 1：七個路由一個入口一件事；舊的 #/ 只轉址到 #/project 或 #/projects。"""
+    app = static_text("app.js")
+    for href in ('"#/new"', '"#/projects"', '"#/project"', '"#/bible"', '"#/letter"', '"#/settings"'):
+        assert href in app, href
+    assert 'page: "new"' in app and 'page: "projects"' in app and 'page: "settings"' in app
+    assert 'page: "chapter/:n"' in app and 'FE.hash("chapter", n)' in app      # 第 N 章＝#/chapter/<n>
+
+    project = static_text("project.js")
+    assert "PAGES.home = () => {" in project                       # #/ 只轉址，不畫頁面
+    assert "PAGES.new = (ctx) => {" in project
+    assert "PAGES.projects = (ctx) => {" in project
+    assert "PAGES.project = async (ctx) => {" in project
+    assert 'FE.go(T2C.project() ? "#/project" : "#/projects")' in project
+
+    common = static_text("common.js")
+    assert 'href: "#/projects"' in common and 'href: "#/new"' in common
+    assert 'href: "#/"' not in common                              # 沒開專案時不再導到舊的首頁
+    chapter = static_text("chapter.js")
+    assert 'href: "#/project"' in chapter and 'href: "#/"' not in chapter   # 麵包屑與回總覽
+
+
+def test_static_nav_hides_work_entries_without_project():
+    """沒有專案時工作入口不出現：導覽以 T2C.project() 分支，專案區只留「（尚未開啟專案）」。"""
+    app = static_text("app.js")
+    assert "const has = !!T2C.project()" in app
+
+    always = between(app, "const items = [", "if (has) {")
+    assert '"#/new"' in always and '"#/projects"' in always        # 這兩項永遠都在
+    for href in ('"#/project"', '"#/bible"', '"#/letter"'):
+        assert href not in always, href                            # 不能留在無條件的那一段
+
+    opened = between(app, "if (has) {", "} else {")
+    for href in ('"#/project"', '"#/bible"', '"#/letter"'):
+        assert href in opened, href
+    assert 'FE.hash("chapter", n)' in opened and "目前的專案：" in opened
+
+    bare = between(app, "} else {", 'items.push({ group: "系統" }')
+    assert "（尚未開啟專案）" in bare
+    for href in ('"#/project"', '"#/bible"', '"#/letter"'):
+        assert href not in bare, href                              # 沒有專案時工作入口不出現
+    assert 'group: "系統"' in app and '"#/settings"' in between(app, 'group: "系統"', "return items")
+
+
+def test_static_settings_page_has_env_card():
+    """設定頁的第一張卡是「環境」（ComfyUI、每個 provider、設定檔、出圖預設），從總覽頁搬過來。"""
+    settings_js = static_text("settings.js")
+    assert "function envCard()" in settings_js
+    assert "重新檢查" in settings_js
+    assert "const STAGE_TEXT = {" in settings_js                   # 階段代號→中文名（環境卡的「用在」那一欄）
+    card = between(settings_js, "function envCard() {", "\n    function draw() {")
+    assert '"環境"' in card and "ComfyUI 已連線" in card and "ComfyUI 沒有回應" in card
+    assert "env.providers" in card and "STAGE_TEXT[s]" in card
+    assert "設定檔：" in card and "出圖預設：" in card
+    assert settings_js.index("envCard(),") < settings_js.index('"語言模型（provider）"')   # 排在第一張
+    assert "/api/env" in settings_js
+    assert "/api/env" not in static_text("project.js")             # 總覽頁不再自己打環境檢查
+
+
+def test_static_css_indents_nav_children_by_href():
+    """子項縮排只用 app.css 的屬性選擇器（照 href 認，不碰 vendor/fekit）；底部狀態是 .shell-env。"""
+    css = static_text("app.css")
+    rule = between(css, '.shell-nav .nav-item[href="#/project"]', "}")
+    for selector in ('[href^="#/chapter/"]', '[href="#/bible"]', '[href="#/letter"]'):
+        assert selector in rule, selector                          # 四個子項同一條規則
+    assert "padding-left" in rule
+    assert ".shell-env" in css and "flex-direction: column" in between(css, ".shell-env {", "}")
+
+
+def test_static_pages_build_nodes_with_fekit_h():
+    """這幾支都用 FE.h 建節點：沒有 innerHTML／outerHTML。"""
+    for name in ("app.js", "project.js", "settings.js", "common.js", "chapter.js"):
+        text = static_text(name)
+        assert "innerHTML" not in text, name
+        assert "outerHTML" not in text, name
+        assert "h(" in text, name
+
+# ---- 步驟 3／4：切對話分頁與反推設定（介面）------------------------------------
+
+def test_static_annotate_tab_and_batch_stage():
+    """章節頁的第七個分頁（切對話）與整章批次的階段清單；都走 /api/chapter/scenes 與 stage=annotate。"""
+    chapter = (ROOT / "web" / "static" / "chapter.js").read_text(encoding="utf-8")
+    assert '["source", "原著"], ["annotate", "切對話"], ["plan", "規劃"]' in chapter
+    assert "T2C.tabs.annotate" in chapter and "/api/chapter/scenes" in chapter
+    assert 'stage: "annotate"' in chapter and "原文第" in chapter
+    assert "忠實度報告" in chapter and "重新切一份（覆蓋）" in chapter
+    common = (ROOT / "web" / "static" / "common.js").read_text(encoding="utf-8")
+    assert 'annotate: "切對話"' in common
+    assert '"annotate", "plan", "script", "storyboard", "render", "pages"' in common
+    assert "重做已有的切對話、規劃、劇本、分鏡" in common      # 批次 force 也涵蓋 annotate
+    for text, name in ((chapter, "chapter.js"), (common, "common.js")):
+        assert "innerHTML" not in text, name
+
+
+def test_static_bible_reverse_panel():
+    """視覺聖經的反推設定：按鈕、對話框送的欄位、進度卡走 /api/bible/reverse。"""
+    bible = (ROOT / "web" / "static" / "bible.js").read_text(encoding="utf-8")
+    assert "反推設定（整本掃描＋成卡）" in bible
+    assert '"/api/task/reverse"' in bible and '"/api/bible/reverse"' in bible
+    for label in ("到第幾章", "至少出現幾章才成卡", "每批 token 預算", "重新掃描全部章節"):
+        assert label in bible, label
+    assert "還沒跑過反推" in bible and "上次被停止" in bible
+    assert "innerHTML" not in bible
+

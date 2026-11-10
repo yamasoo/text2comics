@@ -1,5 +1,15 @@
 /* 文字轉漫畫 自己的樣式。顏色、間距用 fekit 的變數（var(--accent)、var(--sp-3)…），深色模式才會跟著變。 */
 
+/* ── LAYOUT A：左側導覽（docs/06_決策記錄.md D5）── */
+/* fekit 的導覽只有「扁平項目＋一個分組標題」，沒有層級也沒有徽章；子項縮排只能靠 href 認（不改 vendor/fekit/）。 */
+.shell-nav .nav-item[href="#/project"],
+.shell-nav .nav-item[href^="#/chapter/"],
+.shell-nav .nav-item[href="#/bible"],
+.shell-nav .nav-item[href="#/letter"] { padding-left: calc(.75rem + 1rem); }
+/* 底部狀態列：ComfyUI 與金鑰各一行，入口名稱不放數字（fekit 的項目沒有徽章） */
+.shell-env { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-xs); }
+.shell-env .row { gap: var(--sp-1); }
+
 
 /* 嵌字頁 */
 .lt-title { margin: 0; font-size: var(--fs-xl); }
@@ -137,3 +147,24 @@ details.card[open] > summary { margin-bottom: var(--sp-3); }
 .bb-body { max-height: 70vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-3); background: var(--bg-elev); }
 @media (max-width: 1000px) { .bb-split { grid-template-columns: 1fr; } }
 .sb-canvas { max-width: 40rem; max-height: 62vh; display: block; margin: 0 auto; }
+
+/* ── 視覺聖經：分段卡片與過期格（docs/07_微調簡報 步驟 2）── */
+/* 五段與服裝各一組多行輸入框：一行一個英文短語，所以用等寬字。 */
+.bb-sec { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--sp-2); }
+.bb-sec .field { margin: 0; }
+.bb-sec-text { width: 100%; min-height: 4rem; font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.5; resize: vertical; }
+.bb-outfit-card { border: 1px solid var(--line); border-radius: var(--radius); padding: var(--sp-2) var(--sp-3); background: var(--bg-elev); }
+/* 「這一格用哪幾段」對照表與過期格清單：兩欄貼齊，不要表格的預設留白。 */
+.bb-shots td, .bb-stale td { padding: 0 var(--sp-3) var(--sp-1) 0; vertical-align: top; }
+.bb-shots td:first-child { white-space: nowrap; }   /* 「特寫 extreme_close」不要被切成兩行 */
+.bb-shots code { white-space: nowrap; }
+
+/* ── 視覺聖經：反推進度（docs/07_微調簡報 步驟 4）── */
+/* 草稿 id 是一排小按鈕（連到 #/bible/:kind/:id?draft=1）：項目多，讓它自己折行，長名字截斷。 */
+.bb-rev-drafts { flex-wrap: wrap; }
+.bb-rev-drafts .btn { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 出圖頁的兩個設定：先 profile、再預設，各自一行；寬度克制，不要拉滿整個主欄。 */
+.pn-controls { max-width: 32rem; }
+.pn-controls select { width: 100%; }
+.pn-status { margin: 0; }

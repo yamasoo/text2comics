@@ -1,5 +1,107 @@
 # 更新紀錄
 
+## 1.11.3 — 2026-11-10（推送只更新 main；建 commit 不再抓到上層 repo）
+
+- **預設只推 `main`**：`push_github.bat` 現在只更新 `main`（GitHub 的預設分支）與 `gh-pages`（說明頁），`v1_baseline` 不動。要一起更新就 `push_github.bat --branches main,v1_baseline`；不要說明頁就 `--no-pages`。每個分支各自以 `origin/<分支>` 的 tip 當 parent，所以推送都是 fast-forward（`gh-pages` 是新的 root，用 `--force-with-lease`）。
+- **`tools/push_github.py` 建 commit 的方式修好**：原本在暫存目錄跑 `git add`，git 會往上找到別的 repo（家目錄剛好也是 repo），把路徑加進錯的 index，`git write-tree` 就爆 `invalid object`。現在明確指定 `GIT_DIR`／`GIT_WORK_TREE`／`GIT_INDEX_FILE`，不依賴 cwd 探索。
+- **--no-push 實測**：`main → 1b31ef1`（160 個檔案、6.4 MB，沒有開發資料、沒有殘留絕對路徑）、`gh-pages → bd9d9ab`（只有 `index.html` 與 `flow.svg`）。
+- 全專案 pytest 561 passed／1 skipped。
+
+## 1.11.0 — 2026-11-10（公開版：流程圖、單檔說明頁、一鍵推送、附範例出圖）
+
+準備把 `dev` 推上 GitHub 的公開分支（`v1_baseline` 與 `main`）。
+
+- **流程圖（`docs/images/flow.svg`）**：一句話的流程圖，畫出九個階段與「誰做的」——你決定（棕）、AI 寫（藍）、ComfyUI 出圖（綠）、程式（灰）；視覺聖經在下面餵給出圖，並註明「改了卡片 → 過期格清單 → 只重畫受影響的格」。README 與單檔說明頁都用同一張。
+- **`README.html`**：README 的單檔網頁版（自帶樣式、不連 CDN、內含流程圖）；`README.md` 開頭有連結。GitHub 的 repo 首頁仍然只會顯示 `README.md`，要「先看到網頁版」得開 GitHub Pages（見下）。
+- **`push_github.bat` ＋ `tools/push_github.py`（新增，一鍵推送）**：跑測試 → `git archive HEAD` 取出已 commit 的內容 → 移除開發資料（`work/`、`docs/00`、`06`、`07`、`HANDOFF`、`backlog`、`qa/`、`reports/`、`cases/`、`config.json`…）→ 產生 `README.html` → 把範例出圖縮小放進 `examples/sample_comic/renders/`（15 張、長邊 768、調色盤 64 色，約 4 MB）→ 本機絕對路徑換成 `<專案根目錄>` 等佔位字 → 用暫存 index 建 commit → 更新 `v1_baseline`、把 `main` 快轉到同一個 commit、另建 `gh-pages`（只有 `index.html` 與 `flow.svg`）→ `git push`。`--dry-run` 只建快照與印摘要。
+- **`.bat` 全部 ASCII**：中文訊息一律由 Python 印（cmd.exe 會把 .bat 裡的非 ASCII 位元組當指令），沿用 `start.bat` 的做法。
+- **公開版附範例出圖**：下載下來打開 `examples/sample_comic` 就能走到「頁面」下載 PDF／CBZ，不需要 GPU 或金鑰（範例原本的 57 張 123 MB 只取 `ch001` 的 15 張縮圖）。
+- **文件**：README 的「想更了解」只連公開版帶得走的檔案；`docs/技術說明.md` 的文件表把開發文件標成「只在開發分支」。
+- **測試**：沒有動程式邏輯（新增的 `tools/push_github.py` 是發佈工具），pytest 561 passed／1 skipped；`--dry-run` 的公開快照 157 個檔案、6.4 MB，沒有殘留的絕對路徑。
+
+## 1.10.2 — 2026-11-10（README 拆成使用者版與技術說明）
+
+原本的 `README.md` 是給開發者看的（資料夾、模組、命令列），第一次用的人看不到「從安裝到做出一頁」的順序。
+
+- **`README.md`（改寫）**：照 Novel Studio 的寫法重寫成使用者說明——這個工具幫你做什麼、需要什麼、安裝與第一次啟動要看「設定」頁的哪裡、建立專案與匯入整本、一章的七個分頁各自做什麼與要注意什麼、視覺聖經（分段／定裝圖／過期格／探索用）、整章批次與 VRAM、專案資料夾長什麼樣、輸出與閱讀、常見狀況。
+- **`docs/技術說明.md`（原 README 搬過來）**：資料夾、模組、命令列工具、fekit 同步；開頭指向使用者版 README，過時的「目前進度」改成指向 CHANGELOG 與階段計畫。
+- **`README.html`**：同一份內容的單檔網頁版（自帶樣式、不連 CDN），給不想開編輯器的人看。
+- **`tools/md2html.py`（新增）**：Markdown → 單檔 HTML 的小工具（只用標準函式庫；標題、段落、有／無序清單、表格、程式碼、引用、粗體、行內程式碼、連結）。README 改完重跑一次就好：`python tools/md2html.py README.md README.html --title 文字轉漫畫`。
+- **測試**：沒有動程式邏輯，全專案 pytest 仍 561 passed／1 skipped。
+
+## 1.10.1 — 2026-11-10（整章批次：切對話的標籤補上）
+
+1.10.0 把 `annotate` 加進批次的階段之後，按「整章批次」會 500（`server/tasks.py` 的 `BATCH_LABEL` 少了 `annotate`，標題與逐階段項目都會 KeyError）。
+
+- **`server/tasks.py`**：`BATCH_LABEL` 加「切對話」；批次的「已存在就跳過」對照表 `paths` 也補上 `annotate → scenes/chNNN.json`（原本只認 plan／script／storyboard，切過對話的章不會被正確跳過）。
+- **測試**：`tests/test_stages_api.py` 加 1 項——`POST /api/task/batch` 帶 `stages: ["annotate"]` 要 200 且跑完寫出 `scenes/ch001.json`；順便把「每個 `STAGES` 都要在 `BATCH_LABEL`、每個 `LLM_STAGES` 都要在 `STAGE_LABEL`／`STAGE_KEY`」釘住，同一類漏字以後直接紅。全專案 **561 passed, 1 skipped**。
+
+## 1.10.0 — 2026-11-10（微調步驟 3＋4：切對話與反推接上介面）
+
+兩個「核心與命令列早就做完、介面沒有入口」的洞補起來：切對話（N3）與反推設定（N5）。核心沒有重寫，只接服務層與畫面。
+
+- **切對話分頁（第 7 個）**：章節頁分頁變成 原著 → 切對話 → 規劃 → 劇本 → 分鏡 → 出圖 → 頁面；有原著、還沒規劃時預設落在切對話。沒切過顯示說明與「產生切對話（模型）…」；切過顯示標題、場數、「重新切一份（覆蓋）」、忠實度報告（收在 `<details>`）與每一場的逐行清單（種類 chip、說話者、文字、「原文第 N 段」），第一場預設展開。
+- **服務層**：`GET /api/chapter/scenes`（`scenes/chNNN.json` ＋ `build/adapt/chNNN_scenes_fidelity.md`）；`POST /api/task/adapt` 的 `stage: "annotate"`；`server/tasks.py` 的 `STAGES`／`LLM_STAGES`／`STAGE_KEY`／`STAGE_LABEL` 都加了 annotate，批次依 `STAGES` 順序跑（切對話排在規劃前），批次的 force 說明也改成「重做已有的切對話、規劃、劇本、分鏡」。`tools/adapt.py --stage annotate`。
+- **反推設定**：視覺聖經首頁多一顆「反推設定（整本掃描＋成卡）…」——到第幾章、至少出現幾章才成卡、每批 token 預算、重新掃描全部章節；按「開始」跑 `POST /api/task/reverse`，進度（計畫／每批／存檔／草稿／停止）在任務面板。首頁多一張「反推進度」（`GET /api/bible/reverse`）：已完成章數、批次、跳過幾章、草稿張數、只掃到第 N 章、上次被停止、最後更新時間；草稿 id 直接連到草稿卡。**採用就是既有的草稿卡**（確認入庫），沒有另做一套。
+- **測試**：`tests/test_stages_api.py` 4 項（scenes 端點沒有→有、annotate 任務用假模型跑完真的寫出 scenes 與忠實度報告、反推任務掃描＋寫草稿且進度端點看得到章數／批次／草稿、沒帶專案回 400）；`tests/test_ui.py` 加 2 項靜態斷言（七個分頁與批次階段、反推面板與對話框欄位）。全專案 **560 passed, 1 skipped**。
+- **實機截圖（1280×800、淺色、同一個專案影本）**：`work/n8e_ui/shots/` 的 `before-annotate.jpg`（六個分頁、沒有切對話）／`after-annotate.png`（七個分頁與兩場逐行清單）、`before-bible.jpg`／`after-bible.jpg`（反推按鈕與進度卡）、`after-reverse-dialog.jpg`（對話框欄位）。改前是這版之前的 commit 另開的 worktree，兩邊同一個專案。
+- **文件**：`docs/05_介面設計.md`（切對話分頁、反推設定兩節）、`docs/qa/L3.md`。
+## 1.9.2 — 2026-11-10（出圖設定：先 profile 再預設，各自一行）
+
+出圖頁把「出圖預設」排在「出圖 profile」前面，但預設清單是那一組 profile 自己的——順序反了；兩個下拉又跟狀態文字、按鈕擠在同一列，寬視窗下很擠。
+
+- **`web/static/panels.js`**：說明文字一行、**出圖 profile（哪一組模型）一行**、提示一行、**出圖預設（步數／cfg）一行**，按鈕（整章出圖／沒選的先選第一張／篩選／下一步）另起一列。
+- **`web/static/bible.js`**：定裝圖對話框同樣改成 profile 先、預設後，各自一行。
+- **`web/static/app.css`**：`.pn-controls` 寬度上限 32rem，兩個下拉不會拉滿整個主欄。
+- **實機**：1280×800、淺色、同一個專案影本，改前／改後各兩張（`work/n8d_ui/shots/`）：出圖頁與定裝圖對話框。
+- 全專案 **554 passed, 1 skipped**（介面文字與版面，沒有動到核心）。
+
+## 1.9.1 — 2026-11-10（舊卡片一鍵拆成分段）
+
+1.9.0 之後新開的卡片直接就是分段格式，但**之前產生的卡片只有 `look_en`**：分段編輯器的五個框是空的，只能手動把一句話拆成五段。
+
+- **`t2c/bible.split_look()`**：用文字規則把 `look_en` 與整句服裝拆成 `sections`（head／body／upper／lower／accessory）與新式 `outfits`（top／bottom／set／notes）。切在逗號與 and／with／over，短語按字表歸段（build／shoulders／legs／glasses／hair…），分不出來的一律放 `head`。
+- **`POST /api/bible/card/split`**：回拆好的草稿，**不寫檔**；地點卡不分段（回 400 說明）。
+- **介面（`web/static/bible.js`）**：舊格式卡片的提示旁邊多一顆「拆成分段（草稿）」，按了把內容填進五段與服裝卡，人看過、改過再按「儲存分段」。
+- **測試**：`tests/test_sections_api.py` 加 1 項（拆得對、而且沒有寫檔）。全專案 **554 passed, 1 skipped**。
+- **實測**：拿使用者的 `kiryuu_saya` 卡片（`look_en` 一句＋整句服裝）按一次 → head「34-year-old East Asian woman／short black hair pulled back／narrow dark eyes」、body「compact／sturdy build」、服裝 top「navy captain's jacket／gray work shirt」、bottom「dark trousers／heavy rubber-soled boots」。
+
+## 1.9.0 — 2026-11-10（微調步驟 2：分段卡片、過期指紋、探索用、造卡捷徑）
+
+卡片從「一句英文包全部」變成五段，出圖改按鏡頭選段；同時記下每一格用了哪幾段，改卡片或換畫風就算得出「哪幾格要重畫」。缺卡的角色可以先出圖（探索用），只出現一章的配角也能成卡。舊專案的 `look_en` 卡片照樣能讀，不必一次全遷移。
+
+- **分段外觀（`t2c/look.py`，新增）**：角色外觀有兩種寫法——`sections: {head, body, upper, lower, accessory}`（五段英文短語清單）與舊的 `look_en`（一整句）；服裝同樣兩種——`{id: {top, bottom, set, notes}}` 與舊的 `{id: "He wears …"}`。讀取、選段、指紋都走同一支模組，`project.py` 不再要求 `look_en` 必填。
+- **按鏡頭選段（`t2c/compile.py`）**：`SHOT_SECTIONS`／`SHOT_OUTFIT` 對照表——特寫只貼 `head`、近景加 `accessory`、中景加上半身與上著、全身與遠景再多 `body`／`lower`／下著、大遠景全部含套裝名稱。同一角色的臉在任何鏡頭都來自同一段 `head` 文字。沒有 `sections` 的舊卡片照舊貼整段。
+- **出圖指紋與過期（`t2c/stale.py`，新增）**：每一格的 `build/chNNN/<格 id>.prompt.json` 多存 `fingerprint`（畫風、shot、每個角色用到的每一段、地點、提示詞）與 `explore`。「過期」＝拿現在的卡片重算一次比對，`GET /api/bible/stale` 回「哪個角色的哪一段改了」（`下半身`／`上著`／`畫風`…）。`render_jobs()` 只為**真的會畫**的格更新指紋，全部略過時不會讓清單假裝已經追上。
+- **只重畫過期格（`POST /api/task/render` 的 `stale: true`）**：只挑過期的格，**同一批 seed 覆蓋同一批檔名**（`picks/` 指到的檔名不變，頁面重出就是新圖），覆蓋前把舊候選複製到 `build/render/backup/<章>/`；呼叫端給 `more: N` 則照舊加畫，給 `force: false` 就全部略過。沒有過期的格回「沒有過期的格，不用重畫」。
+- **探索用（D2）**：角色還沒有卡片也能出圖，那一格標成「探索用」——`check_page_panels` 從錯誤改成提醒、`panels` 多 `explore`、介面停用選圖並排除「沒選的先選第一張」、不列入過期清單；卡片補上後再正式出圖。
+- **卡片編輯頁的分段編輯器（`web/static/bible.js`＋`POST /api/bible/card/sections`）**：五段與每套服裝各一組輸入框，存檔由 `t2c/bible.apply_sections()` 改寫 frontmatter、本文照舊；旁邊有「哪個鏡頭用哪幾段」對照表。舊格式的卡片顯示提示，存一次就轉成分段；五段全空會先擋（不然外觀就沒了）。
+- **視覺聖經首頁的過期格（`web/static/bible.js`）**：「有 N 格過期」，每章一列（章號、格 id、原因、候選張數）＋每章一顆「只重畫這些格…」。**出圖分頁**多一組篩選（全部／只看過期／只看探索用／只看已選）與「過期：要重畫」chip。
+- **造卡捷徑（D1）**：`tools/reverse.py --min-chapters`（`reverse.Reverser` 收 `min_chapters`），只出現一章的配角也能成卡；單章掃描（`tools/bible.py --chapters`）與手寫雛形卡（`POST /api/bible/new`）原本就有。
+- **規則（`t2c/bible_check.py`）**：新增 `check_sections()`（每段不得有服裝／表情／動作字；性別、年齡、頭髮改成整張卡合起來要有）與 `check_outfit_parts()`（top／bottom／set 的每一項都要是英文短語）。成卡提示詞（`t2c/bible_prompts.py`）改成輸出 `sections` 與新式 `outfits`，範例卡同步改。
+- **測試**：`tests/test_look.py`（7 項，測試資料 `tests/data/sections_card.md`：特寫只含頭部、改下半身只有大遠景過期、換畫風整章過期、探索用不列過期、舊卡片相容）、`tests/test_sections_api.py`（5 項：分段存檔端點、壞卡片擋下、草稿可存、全部略過不更新指紋）、`tests/test_stale_api.py`（7 項，子代理）、`tests/test_reverse.py` 加 1 項（`--min-chapters 1`）。全專案 **553 passed, 1 skipped**（基準 534／1）。
+- **實機截圖（1280×800、淺色、同專案）**：改前 `before-bible.png`／`before-panels.png`（78efb9c 的 worktree），改後 `after-bible.png`（過期格 3 格與原因）、`after-card-sections.png`（分段編輯器與鏡頭對照表）、`after-panels.jpg`（篩選與過期 chip），都在 `work/n8b_ui/shots/`（不進版控）。複核時修掉一個版面缺陷：鏡頭對照表的 `extreme_close` 被切成兩行（`app.css` 加 `white-space: nowrap`）。
+- **文件**：`docs/02_資料格式.md` 第 3 節（sections／outfits／按鏡頭選段／指紋與過期）、`docs/05_介面設計.md`（分段編輯器、過期格、探索用篩選）、`docs/qa/L2.md`。
+## 1.8.0 — 2026-11-10（介面微調：LAYOUT A，步驟 0–1）
+
+照 `docs/07_微調簡報.md` 的步驟 0（先清 backlog）與步驟 1（介面重排）做：七個路由一個入口一件事、導覽分三段、首頁的環境卡搬到設定頁。這一輪只動 `web/static/`、`docs/backlog.md` 與 `t2c/__init__.py` 的版本號，核心邏輯（`t2c/` 其他檔）與 `server/`、`vendor/fekit/` 都沒有改動。
+
+- **步驟 0（`docs/backlog.md`）**：清掉 4 條已經做完的項目（介面的「匯入」頁、畫風預設集下拉、介面裡設定金鑰、出圖 profile 的 LoRA 列舉），並修掉第 56 行把表格切成兩段的空行。S4 那條「在本工具的介面裡設定／儲存金鑰」改寫成只剩檔案型金鑰來源：讀 Novel Studio 的 `secrets.json`（介面存金鑰已在 N6 由 `POST /api/llm/key` 接系統金鑰庫）。
+- **七個路由（`web/static/app.js`、`web/static/project.js`）**：`#/new`（新建專案）、`#/projects`（開啟專案）、`#/project`（總覽）、`#/chapter/:n`（第 N 章）、`#/bible`（視覺聖經）、`#/letter`（嵌字）、`#/settings`（設定），一個入口一件事。`project.js` 拆成 `PAGES.home`／`PAGES.new`／`PAGES.projects`／`PAGES.project` 四頁；舊的 `#/` 只轉址——有專案到 `#/project`，沒有專案到 `#/projects`。`common.js` 的「還沒開啟漫畫專案」提示與 `chapter.js` 的麵包屑也從 `#/` 改成 `#/projects`／`#/project`。
+- **導覽三段（`web/static/app.js`）**：專案（新建專案、開啟專案）／目前的專案：資料夾名（總覽、第 N 章、視覺聖經、嵌字）／系統（設定）。**沒有專案時工作入口不出現**（`const has = !!T2C.project()`），專案區只留一個「（尚未開啟專案）」分組。子項縮排只用 `app.css` 的屬性選擇器（`a.nav-item[href="#/project"]`、`[href^="#/chapter/"]`、`[href="#/bible"]`、`[href="#/letter"]` 共用一條 `padding-left`），**沒有改 `vendor/fekit/`**。
+- **設定頁接手環境卡（`web/static/settings.js`、`web/static/app.js`、`web/static/app.css`）**：總覽頁的「環境」卡搬到設定頁的**第一張卡**（`envCard()`：ComfyUI 連不連得上、每個 provider 有沒有金鑰與用在哪個階段、設定檔路徑與出圖預設，右上角「重新檢查」；階段中文名由 `STAGE_TEXT` 對），總覽頁不再自己打 `/api/env`。左側底部（`slots.nav_foot`）新增一行 ComfyUI／金鑰狀態（`.shell-env`，含重新檢查的 ↻），換專案時一起重抓。
+- **測試**：`tests/test_ui.py` 追加 5 項（`test_static_nav_has_seven_routes`、`test_static_nav_hides_work_entries_without_project`、`test_static_settings_page_has_env_card`、`test_static_css_indents_nav_children_by_href`、`test_static_pages_build_nodes_with_fekit_h`），既有測試沒有改弱；全專案 **534 passed, 1 skipped**（基準 529／1）。另外用 11 個「改回舊結構」的假字串反向驗過，每一條都會紅（導覽改回單頁 `#/`、環境卡搬回總覽頁、縮排改回 fekit 的 class 選擇器、檔案出現 `innerHTML`…）。
+- **實機截圖（1280×800、淺色、同場景）**：改前 2 張（`before-project.png`、`before-no-project.png`：舊的單頁 `#/` 與扁平導覽）、改後 5 張（`after-new.png`、`after-projects.png`、`after-project.png`、`after-chapter.png`、`after-settings.png`：三段導覽與設定頁的環境卡），都在 `work/n8_ui/shots/`（`work/` 不進版控）。
+
+## 1.7.1 — 2026-11-10（第一次啟動自動建環境）
+
+新 clone 沒有 `.venv/` 與 `config.json`（都不進版控），以前雙擊 `start.bat` 會直接噴 `ModuleNotFoundError: No module named 'uvicorn'`。
+
+- **`start.bat`**：找不到 `.venv` 時自動用 `py -3`（或 `python`）建立虛擬環境、安裝 `requirements.txt`，再啟動；找得到就直接啟動。**整個 .bat 只用 ASCII**（cmd.exe 會把 .bat 裡的非 ASCII 位元組當指令解析，中文訊息一律交給 Python 印），並設 `PYTHONUTF8=1` 讓中文在 UTF-8 主控台正常顯示。
+- **`tools/bootstrap.py`（新增）**：建立 `.venv`、升級 pip、安裝 `requirements.txt`、提醒複製 `config.json`，最後用 `.venv` 的 Python 執行 `run.py`（參數原樣轉傳，例如 `--port 9000 --no-open`）。找得到／找不到 Python、安裝失敗都有繁體中文的下一步指示。
+- **文件**：`docs/03_建置與環境.md` 第 3.1 節說明第一次啟動的流程與手動指令。
+- **實測**（Windows，乾淨資料夾）：刪掉 `.venv` 後執行 `start.bat` → 建環境、裝完 25 個套件、提醒沒有 `config.json`、啟動 `run.py` 並原樣收到 `--no-open`；`.venv` 已存在時直接啟動、不重裝。
+
 ## 1.7.0 — 2026-11-09（介面入口：畫風預設集＋整本匯入切章，N7）
 
 兩個「後端早就做好、介面沒有入口」的洞補起來：畫風預設集（N5 的待決問題 25）與整本匯入切章（N2 延後項）。核心與 CLI 都沒有重寫，只是把既有的 `t2c/styles.py`、`t2c/importer.py` 接上介面。

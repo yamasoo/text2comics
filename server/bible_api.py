@@ -1,15 +1,16 @@
-"""視覺聖經：卡片（定案與草稿）的讀寫、確認入庫、定裝圖候選與挑選。抽取與出圖任務在 tasks.py。"""
+"""視覺聖經：卡片（定案與草稿）的讀寫、確認入庫、定裝圖候選與挑選、過期清單。抽取與出圖任務在 tasks.py。"""
 import re
 
 from fastapi import APIRouter, Body, Query
 
 from fekit import ApiError
 
-from t2c import bible, bible_check
+from t2c import bible, bible_check, look, stale
 from t2c.project import ID_RE, ProjectError, read_front_matter
 from t2c.script import Issue, errors
 
 from .common import body_project, guard
+from .common import chapter as chapter_no
 from .common import project as open_project
 
 router = APIRouter()
@@ -52,7 +53,7 @@ def overview(project: str = ""):
                 meta, body = {}, ""
             cards.append({"kind": kind, "draft": draft, "id": str(meta.get("id") or path.stem), "file": path.stem,
                           "name": str(meta.get("name") or path.stem), "aliases": [str(a) for a in meta.get("aliases") or []],
-                          "look_en": " ".join(str(meta.get("look_en") or "").split()),
+                          "look_en": look.look_en(meta),
                           "outfits": {str(k): " ".join(str(v or "").split()) for k, v in (meta.get("outfits") or {}).items()},
                           "outfit_notes": {str(k): str(v) for k, v in (meta.get("outfit_notes") or {}).items()},
                           "pending": "## 待確認" in body, "issues": _issues(issues)})
@@ -79,6 +80,58 @@ def card_get(project: str = "", kind: str = "character", id: str = "", draft: bo
 def _picked(proj, kind, cid):
     picks = bible.load_picks(proj)
     return (picks["characters"] if kind == "character" else picks["locations"]).get(cid)
+
+
+@router.post("/api/bible/card/sections")
+def card_sections(body: dict = Body(...)):
+    """分段編輯器存檔：只換 frontmatter 的 sections／outfits，本文（人看的說明）照舊。
+    走 t2c/bible.apply_sections()，規則檢查與 card_save 同一套：定案卡片有 error 就擋。"""
+    proj = body_project(body)
+    kind = _kind(body.get("kind"))
+    cid, draft = str(body.get("id") or ""), bool(body.get("draft"))
+    sections = body.get("sections")
+    outfits = body.get("outfits")
+    if sections is None and outfits is None:
+        raise ApiError(400, "沒有東西可以存：請帶 sections 或 outfits", "bad_card")
+    if sections is not None and not isinstance(sections, dict):
+        raise ApiError(400, "sections 要是 {段名: [英文短語…]}", "bad_card")
+    if outfits is not None and not isinstance(outfits, dict):
+        raise ApiError(400, "outfits 要是 {服裝 id: {top: […], bottom: […], set: […], notes: 中文}}", "bad_card")
+    try:
+        result = bible.apply_sections(proj, kind, cid, sections=sections, outfits=outfits, draft=draft, write=False)
+    except bible.BibleError as error:
+        raise ApiError(400, str(error), "bad_card")
+    except ProjectError as error:
+        raise ApiError(400, str(error), "bad_card")
+    issues = result["issues"]
+    if not draft:
+        errs = errors(issues)
+        if errs:
+            raise ApiError(400, "定案卡片不能有錯誤（分鏡編譯要用）：\n%s" % "\n".join("  - %s" % e for e in errs), "bad_card")
+    path = result["path"]
+    text = result["text"]
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text if text.endswith("\n") else text + "\n")
+    return {"path": path, "text": text, "issues": _issues(issues), "stale": result["stale"]}
+
+
+@router.post("/api/bible/card/split")
+def card_split(body: dict = Body(...)):
+    """舊卡片（只有 look_en／整句服裝）→ 分段草稿。**不寫檔**：只是把拆好的內容回給介面填進輸入框，
+    人看過、改過再按「儲存分段」。文字規則寫在 t2c/bible.split_look()。"""
+    proj = body_project(body)
+    kind = _kind(body.get("kind"))
+    cid, draft = str(body.get("id") or ""), bool(body.get("draft"))
+    path = _card_path(proj, kind, cid, draft)
+    if not path.is_file():
+        raise ApiError(404, "找不到卡片：%s" % path, "not_found")
+    if kind != "character":
+        raise ApiError(400, "地點不分段：地點只有 look_en（空鏡）", "bad_kind")
+    try:
+        meta, _body = read_front_matter(path)
+    except ProjectError as error:
+        raise ApiError(400, str(error), "bad_card")
+    return bible.split_look(meta)
 
 
 @router.post("/api/bible/card")
@@ -169,3 +222,31 @@ def pick(body: dict = Body(...)):
     with guard("pick_failed"):
         kind, cid, outfit, view = bible.pick(proj, str(body.get("image") or ""))
     return {"kind": kind, "id": cid, "outfit": outfit, "view": view}
+
+
+# ---- 過期清單（步驟 2：卡片改了哪幾格要重畫） --------------------------------------
+
+def _chapter_stale(proj, n):
+    """一章的過期清單：{"chapter", "title", "panels", "count"}。沒有過期的格也回傳（count 0）。"""
+    panels = stale.chapter(proj, n)
+    try:
+        title = str(proj.load_storyboard(n).get("title") or "")
+    except ProjectError:                       # 分鏡讀不懂：還能列出過期的格（標題空白）
+        title = ""
+    return {"chapter": n, "title": title, "panels": panels, "count": len(panels)}
+
+
+@router.get("/api/bible/stale")
+def stale_list(project: str = "", chapter: str = Query("")):
+    """哪幾格過期（卡片或畫風改了，見 t2c/stale.py）：帶 chapter 只算那一章，不帶算整部。
+
+    帶 chapter 時那一章一定在清單裡（count 0 就是「沒有過期的格」）；不帶時只列有過期的章。
+    total 是清單裡所有章加起來的格數。
+    """
+    proj = open_project(project)
+    with guard():
+        if str(chapter or "").strip():
+            rows = [_chapter_stale(proj, chapter_no(chapter))]
+        else:
+            rows = stale.project_chapters(proj)
+    return {"chapters": rows, "total": sum(row["count"] for row in rows)}

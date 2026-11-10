@@ -6,6 +6,8 @@
   const THUMB = 220;
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const r3 = (v) => Math.round(v * 1000) / 1000;
+  // 探索用：這一格有角色還沒有卡片，後端照「猜的」外觀出圖，這一格不進 picks（見 docs/07_微調簡報 步驟 2）。
+  const exploreOf = (p) => (Array.isArray(p.explore) ? p.explore : []);
 
   /** compose.crop_window 的同一套算法（比例）：回傳 [x0, y0, x1, y1]。 */
   function cropWindow(src, cell, focus, zoom) {
@@ -58,7 +60,7 @@
     const render = (body2, label) => T2C.run("/api/task/render", Object.assign({ chapter: n, preset: preset.value || null, profile: profile.value || null }, body2));
     const rendered = data.panels.filter((p) => p.candidates.length).length;
     const picked = data.panels.filter((p) => p.pick).length;
-    const unpicked = data.panels.filter((p) => p.candidates.length && !p.pick);
+    const unpicked = data.panels.filter((p) => p.candidates.length && !p.pick && !exploreOf(p).length);
 
     async function pickAll() {
       try {
@@ -67,27 +69,56 @@
       } catch (error) { FE.fail(error); }
     }
 
-    body.replaceChildren(h("div", { class: "stack" },
-      h("div", { class: "row" },
-        h("span", { class: "grow" }, `已出圖 ${rendered}／${data.panels.length} 格，已選圖 ${picked}／${data.panels.length} 格。`,
-          h("span", { class: "muted" }, "　點縮圖就是選它；沒選的格組版時暫用第一張。")),
-        data.presets.length ? h("label", { class: "row t2c-inline" }, "出圖預設", preset) : null,
-        profiles.length ? h("div", { class: "stack t2c-tight" },
-          h("label", { class: "row t2c-inline" }, "出圖 profile", profile),
-          h("span", { class: "muted t2c-small" }, "同一臺 ComfyUI 一次只掛一組模型；換 profile 請先在 ComfyUI 換模型。")) : null,
-        h("button", { class: "btn btn-primary", type: "button", onclick: () => render({}) }, "整章出圖（補沒畫的）"),
-        unpicked.length ? h("button", { class: "btn", type: "button", onclick: pickAll }, `沒選的 ${unpicked.length} 格先選第一張`) : null,
-        h("a", { class: "btn", href: FE.hash("chapter", n, { tab: "pages" }) }, "下一步：頁面 →")),
-      data.pages.map((page) => h("section", { class: "stack" },
+    /* ── 篩選（docs/07_微調簡報 步驟 2）：全部／過期／探索用／已選。只換清單，不重打 API。 ── */
+    const filterKey = "render.filter";
+    const FILTERS = [["", "全部"], ["stale", "只看過期"], ["explore", "只看探索用"], ["picked", "只看已選"]];
+    const counts = { "": data.panels.length, stale: data.panels.filter((p) => p.stale).length,
+      explore: data.panels.filter((p) => exploreOf(p).length).length, picked };
+    const stored = FE.store.get(filterKey, "");
+    let filter = FILTERS.some(([value]) => value === stored) ? stored : "";
+    const filterSelect = h("select", { "aria-label": "篩選格子",
+      title: "過期＝卡片的外觀改了、這一格要重畫；探索用＝有角色還沒有卡片，不進 picks。",
+      onchange: () => { filter = filterSelect.value; FE.store.set(filterKey, filter); draw(); } },
+      FILTERS.map(([value, label]) => h("option", { value, selected: value === filter }, `${label}（${counts[value]}）`)));
+    const listHost = h("div", { class: "stack" });
+    const matches = (p) => (filter === "stale" ? !!p.stale : filter === "explore" ? exploreOf(p).length > 0 : filter === "picked" ? !!p.pick : true);
+    function draw() {
+      const rows = data.panels.filter(matches);
+      if (!rows.length) { listHost.replaceChildren(h("div", { class: "empty" }, filter ? "這個篩選沒有符合的格。" : "這一章還沒有格子。")); return; }
+      const pages = filter ? [...new Set(rows.map((p) => p.page))].sort((a, b) => a - b) : data.pages;
+      listHost.replaceChildren(...pages.map((page) => h("section", { class: "stack" },
         h("div", { class: "row" }, h("h2", { class: "t2c-h2 grow" }, `第 ${page} 頁`),
           h("button", { class: "btn btn-sm", type: "button", onclick: () => render({ page }) }, "出這一頁（補沒畫的）")),
-        h("div", { class: "pn-grid" }, data.panels.filter((p) => p.page === page).map((p) => panelCard(p)))))));
+        h("div", { class: "pn-grid" }, rows.filter((p) => p.page === page).map((p) => panelCard(p))))));
+    }
+
+    // 順序：先選出圖 profile（哪一組模型），再選出圖預設（步數／cfg）——預設清單是那一組 profile 自己的。
+    // 兩者各自一行，不跟狀態文字與按鈕擠在同一列。
+    body.replaceChildren(h("div", { class: "stack" },
+      h("p", { class: "pn-status" }, `已出圖 ${rendered}／${data.panels.length} 格，已選圖 ${picked}／${data.panels.length} 格。`,
+        h("span", { class: "muted" }, "　點縮圖就是選它；沒選的格組版時暫用第一張。")),
+      h("div", { class: "pn-controls stack t2c-tight" },
+        profiles.length ? h("label", { class: "field" }, h("span", { class: "t2c-small" }, "出圖 profile（哪一組模型）"), profile) : null,
+        profiles.length ? h("p", { class: "muted t2c-small" }, "同一臺 ComfyUI 一次只掛一組模型；換 profile 請先在 ComfyUI 換模型。") : null,
+        data.presets.length ? h("label", { class: "field" }, h("span", { class: "t2c-small" }, "出圖預設（步數／cfg，清單跟著 profile 換）"), preset) : null),
+      h("div", { class: "row" },
+        h("button", { class: "btn btn-primary", type: "button", onclick: () => render({}) }, "整章出圖（補沒畫的）"),
+        unpicked.length ? h("button", { class: "btn", type: "button", onclick: pickAll }, `沒選的 ${unpicked.length} 格先選第一張`) : null,
+        h("label", { class: "row t2c-inline" }, "篩選", filterSelect),
+        h("a", { class: "btn", href: FE.hash("chapter", n, { tab: "pages" }) }, "下一步：頁面 →")),
+      listHost));
+    draw();
 
     function panelCard(p) {
       const more = h("select", { "aria-label": "加畫張數" }, [1, 2, 3, 4].map((k) => h("option", { value: k }, `加畫 ${k} 張`)));
       const chosen = p.pick && p.pick.image;
+      const explore = exploreOf(p);
+      const locked = explore.length > 0;          // 探索用不進 picks：這一格的角色還沒有卡片
       const thumbs = p.candidates.map((c) => h("figure", { class: ["pn-cand", c.file === chosen && "pn-picked"] },
-        h("button", { class: "pn-thumb", type: "button", title: `選這張（seed ${c.seed}${c.preset ? "，" + c.preset : ""}${c.profile ? "，profile " + c.profile : ""}）`, onclick: () => choose(p, c.file) },
+        h("button", { class: "pn-thumb", type: "button", disabled: locked,
+          title: locked ? "探索用：這一格不能選圖（先把這幾張卡片做出來，再重畫這一格）"
+            : `選這張（seed ${c.seed}${c.preset ? "，" + c.preset : ""}${c.profile ? "，profile " + c.profile : ""}）`,
+          onclick: locked ? null : () => choose(p, c.file) },
           h("img", { src: T2C.img(`${data.renders}/${c.file}`, THUMB), alt: c.file, loading: "lazy" })),
         h("figcaption", { class: "row t2c-tight" },
           h("span", { class: "grow t2c-small" }, `s${c.seed}`, c.preset ? h("span", { class: "chip" }, c.preset) : null,
@@ -99,7 +130,10 @@
       return h("article", { class: ["card card-flat stack t2c-tight pn-card", !p.candidates.length && "pn-empty"] },
         h("div", { class: "row" }, h("b", {}, `第 ${p.slot} 格`), h("code", { class: "t2c-small" }, p.id),
           h("span", { class: "muted t2c-small grow" }, `${p.gen_size[0]}×${p.gen_size[1]}`),
+          p.stale ? T2C.chip("過期：要重畫", "warn") : null,
           p.pick ? h("button", { class: "btn btn-sm", type: "button", onclick: () => cropDialog(p) }, `裁切${p.pick.zoom > 1 || p.pick.focus[0] !== 0.5 || p.pick.focus[1] !== 0.5 ? "（已調）" : ""}`) : null),
+        locked ? h("div", { class: "row t2c-tight" }, explore.map((cid) => T2C.chip(`探索用：還沒有 ${cid} 的卡片`, "warn"))) : null,
+        locked ? h("p", { class: "t2c-small muted" }, "探索用不進 picks（選圖先停用）：先把上面這幾張卡片做出來，再重畫這一格，外觀才會是定案的那一份。") : null,
         h("p", { class: "t2c-small pn-scene" }, p.scene),
         p.lines.length ? h("p", { class: "t2c-small muted" }, p.lines.map((t) => `「${t.replace(/\n/g, "")}」`).join("")) : null,
         p.candidates.length ? h("div", { class: "pn-cands" }, thumbs) : h("div", { class: "empty" }, "還沒有出圖"),

@@ -24,7 +24,7 @@
       busy: 0,
       timer: null,
     };
-    ctx.crumbs([{ label: "專案", href: "#/" }, { label: `第 ${st.chapter} 章`, href: FE.hash("chapter", st.chapter, { tab: "pages" }) }, { label: `嵌字（第 ${st.page} 頁）` }]);
+    ctx.crumbs([{ label: "總覽", href: "#/project" }, { label: `第 ${st.chapter} 章`, href: FE.hash("chapter", st.chapter, { tab: "pages" }) }, { label: `嵌字（第 ${st.page} 頁）` }]);
 
     const data = await FE.api("/api/letter/plan", { query: { project: st.project, chapter: st.chapter, page: st.page }, signal: ctx.signal });
     st.project = data.project;

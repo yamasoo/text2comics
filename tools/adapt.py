@@ -52,7 +52,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("project", help="漫畫專案資料夾")
     ap.add_argument("chapter", type=int, help="章編號（1 → source/ch001.txt）")
-    ap.add_argument("--stage", choices=("plan", "script", "storyboard", "all"), default="all")
+    ap.add_argument("--stage", choices=("annotate", "plan", "script", "storyboard", "all"), default="all")
     ap.add_argument("--pages", type=int, help="（plan）指定總頁數；不給就由模型決定")
     ap.add_argument("--title", default="", help="（plan）章名；不給就由模型沿用原著")
     ap.add_argument("--page", type=int, action="append", help="（script／storyboard）只做這一頁，可重複；其他頁維持原樣")
