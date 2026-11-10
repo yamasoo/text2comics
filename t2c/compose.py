@@ -208,11 +208,21 @@ def page_panels(project, chapter, page, pages_data, picks):
     return result, warnings
 
 
-def compose_page(project, chapter, page, pages_data, picks, gray=True, numbers=False):
+def auto_gray(project):
+    """組版要不要轉灰階：預設保留原色（所見即所出），只有 project.yaml 明寫 output.gray: true 才轉。
+
+    不依畫風預設集自動判斷：1.12.1 試過「mono 就轉灰階」，但沒寫 style_preset 的舊專案會被當成 mono，
+    出圖彩色、頁面卻變黑白（1.12.2 改掉）。畫風預設集的 gray 只是那個畫風的建議值，要不要套用由人決定。"""
+    output = project.config.get("output") if isinstance(project.config.get("output"), dict) else {}
+    return output.get("gray") is True
+
+
+def compose_page(project, chapter, page, pages_data, picks, gray=None, numbers=False):
     """組一頁（不含嵌字）。page 是分鏡裡的一頁。回傳 (PIL.Image, warnings)。"""
     infos, warnings = page_panels(project, chapter, page, pages_data, picks)
     cfg = pages_data["page"]
     width, height = layout.page_size(cfg)
+    gray = auto_gray(project) if gray is None else bool(gray)
     mode, white, black = ("L", 255, 0) if gray else ("RGB", (255, 255, 255), (0, 0, 0))
     canvas = Image.new(mode, (width, height), white)
     draw = ImageDraw.Draw(canvas)
@@ -257,7 +267,7 @@ def _lettering(lettering):
     return lettering if isinstance(lettering, letter.Settings) else letter.Settings.from_config(lettering)
 
 
-def render_page(project, chapter, page, pages_data=None, picks=None, gray=True, numbers=False, lettering=None,
+def render_page(project, chapter, page, pages_data=None, picks=None, gray=None, numbers=False, lettering=None,
                 letters=None, guides=False, art=None):
     """一頁：組版（＋嵌字）。回傳 (PIL.Image, plan 或 None, warnings)。
     art 是已經組好的頁面（介面拖曳預覽時重用，避免每次重新裁圖）；會複製一份，不會改到它。"""
@@ -285,7 +295,7 @@ def save_page(canvas, path, pages_data):
     return Path(path)
 
 
-def compose_chapter(project, chapter, storyboard, pages_data=None, only_page=None, picks=None, gray=True,
+def compose_chapter(project, chapter, storyboard, pages_data=None, only_page=None, picks=None, gray=None,
                     numbers=False, out_dir=None, lettering=None, letters=None, guides=False):
     """整章（或 only_page）→ pages/chNNN/pNNN.png。回傳 [(頁碼, 路徑)]、警告清單。
 

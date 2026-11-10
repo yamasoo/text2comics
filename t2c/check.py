@@ -11,6 +11,7 @@ import re
 from . import layout
 from .compile import ANGLE, BUBBLE_KINDS, OFFSCREEN_KINDS, SHOT, side_of_frame
 from . import script as sc
+from . import cast
 from .script import Issue, MAX_BUBBLES, resolve_speaker
 
 CJK = re.compile(r"[㐀-鿿豈-﫿　-〿＀-￯]")
@@ -36,7 +37,7 @@ WEAR = re.compile(r"\b(wears?|wearing|dressed in)\b", re.I)
 CLOTHES_WORD = re.compile(r"\b(%s)\b" % CLOTHES, re.I)
 
 PANEL_KEYS = {"slot", "id", "shot", "angle", "location", "scene", "characters", "objects", "sfx", "bubbles", "seeds"}
-CHAR_KEYS = {"id", "outfit", "pose", "expression", "box"}
+CHAR_KEYS = {"id", "outfit", "pose", "expression", "box", "extra"}   # extra：臨時角色旗標（D9）
 BUBBLE_KEYS = {"kind", "speaker", "text", "anchor", "offscreen"}
 
 VOICE_KINDS = {"speech", "shout", "whisper"}   # 劇本沒標語氣的台詞，分鏡可以在這三種裡選
@@ -131,7 +132,7 @@ def check_panel(project, page_no, panel):
     _appearance(panel.get("scene"), "scene", where, issues)
 
     chars = panel.get("characters", [])
-    cast, boxes = [], []
+    cast_ids, boxes = [], []
     if not isinstance(chars, list):
         issues.append(Issue("error", where, "characters 要是陣列（沒有人就給 []）"))
         chars = []
@@ -139,30 +140,41 @@ def check_panel(project, page_no, panel):
         if not isinstance(entry, dict):
             issues.append(Issue("error", where, "characters 的每一項要是物件 {id, pose, expression, box}"))
             continue
-        cid = entry.get("id")
+        raw = entry.get("id")
         for key in sorted(set(entry) - CHAR_KEYS):
-            issues.append(Issue("warn", where, "角色「%s」多餘的欄位「%s」已忽略" % (cid, key)))
-        if cid not in project.characters:
-            # 步驟 2 的 D2：還沒有卡片的角色可以先出圖，那一格標成「探索用」（不進選圖、頁面與過期清單）
-            issues.append(Issue("warn", where, "角色「%s」還沒有卡片（現有：%s）：這一格會標成探索用，不進選圖／頁面／過期清單；補上卡片後再正式出圖"
-                                % (cid, "、".join(project.characters) or "無")))
-            cast.append(cid)
+            issues.append(Issue("warn", where, "角色「%s」多餘的欄位「%s」已忽略" % (raw, key)))
+        if "extra" in entry and not isinstance(entry["extra"], bool):
+            issues.append(Issue("error", where, "角色「%s」的 extra 只能是 true 或 false" % raw))
+        cid, grade, suggests = cast.grade(project, entry)
+        if grade == "card" and "extra" in entry:
+            issues.append(Issue("warn", where, "角色「%s」已經有卡片，extra 旗標沒有作用（會忽略）" % raw))
+        if grade == "missing":
+            # D9：解析失敗又沒有旗標＝待補的具名角色，那一格維持探索用（不進選圖、頁面與過期清單）。
+            # 龍套標 "extra": true 就能出圖與選圖；名字寫錯就改 id 或補別名（D11 只給建議）。
+            hint = ("；你是不是要對應到「%s」？" % "」或「".join(suggests)) if suggests else ""
+            issues.append(Issue("warn", where, "角色「%s」還沒有卡片（現有：%s）：這一格會標成探索用，不進選圖／頁面／過期清單。龍套請標 \"extra\": true；名字寫錯就改 id 或把拼法補進別名%s"
+                                % (raw, "、".join(project.characters) or "無", hint)))
+            if raw in cast_ids:
+                issues.append(Issue("error", where, "角色「%s」在同一格出現兩次" % raw))
+            cast_ids.append(raw)
             continue
-        if cid in cast:
-            issues.append(Issue("error", where, "角色「%s」在同一格出現兩次" % cid))
-        cast.append(cid)
-        outfit = entry.get("outfit") or "default"
-        outfits = project.characters[cid].get("outfits") or {}
-        if outfit != "default" and outfit not in outfits:
-            issues.append(Issue("error", where, "角色「%s」沒有服裝「%s」（現有：%s）" % (cid, outfit, "、".join(["default"] + list(outfits)))))
+        key_id = cid if cid is not None else raw
+        if key_id in cast_ids:
+            issues.append(Issue("error", where, "角色「%s」在同一格出現兩次" % key_id))
+        cast_ids.append(key_id)
+        if grade == "card":
+            outfit = entry.get("outfit") or "default"
+            outfits = project.characters[cid].get("outfits") or {}
+            if outfit != "default" and outfit not in outfits:
+                issues.append(Issue("error", where, "角色「%s」沒有服裝「%s」（現有：%s）" % (cid, outfit, "、".join(["default"] + list(outfits)))))
         for field_name in ("pose", "expression"):
             if entry.get(field_name):
-                _english(entry[field_name], "%s 的 %s" % (cid, field_name), where, issues)
-                _appearance(entry[field_name], "%s 的 %s" % (cid, field_name), where, issues)
+                _english(entry[field_name], "%s 的 %s" % (key_id, field_name), where, issues)
+                _appearance(entry[field_name], "%s 的 %s" % (key_id, field_name), where, issues)
         if "box" in entry:
-            b = _box(entry["box"], "角色「%s」的 box" % cid, where, issues)
+            b = _box(entry["box"], "角色「%s」的 box" % key_id, where, issues)
             if b:
-                boxes.append((cid, b))
+                boxes.append((key_id, b))
     if len(boxes) >= 2:
         sides = [side_of_frame(b) for _, b in boxes]
         if len(set(sides)) == 1:
@@ -228,9 +240,9 @@ def check_panel(project, page_no, panel):
         elif offscreen:
             if kind not in OFFSCREEN_KINDS:
                 issues.append(Issue("error", where, "「%s」：%s 的對話框不能 offscreen（心聲要看得到人）。要嘛把 %s 畫進這一格，要嘛改成 speech／radio" % (shown(text), kind, speaker)))
-            if speaker in cast:
+            if speaker in cast_ids:
                 issues.append(Issue("error", where, "「%s」標了 offscreen，但 %s 列在這一格的 characters 裡（會被畫出來）。人不在畫面上就從 characters 拿掉" % (shown(text), speaker)))
-        elif speaker not in cast:
+        elif speaker not in cast_ids:
             issues.append(Issue("error", where, "「%s」說話，但 %s 不在這一格的 characters 裡。人在畫面外、或透過通訊從別處說話，就在這個對話框加 \"offscreen\": true（通訊用 kind \"radio\"），**不要**把他加進 characters；人就在畫面上，才加進 characters" % (shown(text), speaker)))
         anchor = b.get("anchor")
         if not (isinstance(anchor, (list, tuple)) and len(anchor) == 2 and all(_is_num(v) and 0 <= v <= 1 for v in anchor)):

@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 
-from . import layout, look, styles
+from . import cast, layout, look, styles
 
 SHOT = {
     "extreme_wide": "extreme wide establishing shot",
@@ -64,6 +64,8 @@ def cast_sentence(count):
 
 
 NO_FRAME = "The image has no border or frame."
+# 臨時角色（D9）：沒有卡片時的通用外觀。不猜性別、髮型、年齡——猜錯比空泛更貴（S1 實測）。
+EXTRA_LOOK = "An unnamed minor character with a plain generic appearance"
 NO_LETTERING = "The artwork has no speech bubbles, captions or lettering."
 
 
@@ -88,9 +90,12 @@ def _subject(card):
     return "This character"
 
 
+def _side_text(side):
+    return "in the center of the frame" if side == "center" else "on the %s side of the frame" % side
+
+
 def side_sentence(card, side):
-    where = "in the center of the frame" if side == "center" else "on the %s side of the frame" % side
-    return "%s is %s." % (_subject(card), where)
+    return "%s is %s." % (_subject(card), _side_text(side))
 
 
 def character_caption(card, entry, side=None, shot=None):
@@ -165,18 +170,32 @@ def compile_panel(project, page, panel, template_box, settings):
                           "bbox": layout.to_moss_bbox([0, 0, 1, 1], width, height)})
         seen = set()
         shot = panel.get("shot")
-        explore, fingerprints = [], {}          # 探索用（D2）與帳單軌（D1）的指紋
+        # 探索用（D2）＝待補的具名角色；臨時角色（D9）＝標了 extra 的龍套，可以出圖與選圖；
+        # 帳單軌（D1）的指紋。這三件事以前混成一種，微5 把它們分開。
+        explore, unresolved, fingerprints = [], [], {}
         for entry in chars:
-            cid = entry.get("id")
-            if cid in seen:
-                raise KeyError("角色「%s」在同一格出現兩次" % cid)
-            seen.add(cid)
-            card = project.characters.get(cid)
+            raw = entry.get("id")
+            if raw in seen:
+                raise KeyError("角色「%s」在同一格出現兩次" % raw)
+            seen.add(raw)
+            cid, grade, suggests = cast.grade(project, entry)
+            if cid is not None:
+                seen.add(cid)                    # 對話框的 speaker 寫的是卡片 id
             box = entry.get("box", [0.25, 0.1, 0.75, 1])
             side = side_of_frame(layout.check_box(box)) if len(chars) >= 2 else None
-            if card is None:                     # 還沒有卡片：照樣算人數，但沒有外觀可貼（探索用）
-                explore.append(cid)
+            if grade == "missing":               # 解析失敗又沒有旗標：照樣算人數，沒有外觀可貼（探索用）
+                explore.append(raw)
+                unresolved.append({"id": raw, "suggest": suggests})
                 continue
+            if grade == "extra":                 # 臨時角色：通用外觀，指紋記常數所以不會永遠算過期
+                caption = [EXTRA_LOOK] + (["This character is " + _side_text(side)] if side else [])
+                caption += [entry["pose"]] if entry.get("pose") else []
+                caption += ["Facial expression: " + entry["expression"]] if entry.get("expression") else []
+                fingerprints["extra:%s" % raw] = {"outfit": "extra", "parts": {"extra": ""}}
+                items.append({"label": "character", "caption": " ".join(_sentence(c) for c in caption),
+                              "bbox": layout.to_moss_bbox(box, width, height)})
+                continue
+            card = project.characters[cid]
             outfit_id = entry.get("outfit") or "default"
             fingerprints[cid] = {"outfit": outfit_id, "parts": look.fingerprint(card, shot, outfit_id)}
             items.append({"label": "character", "caption": character_caption(card, entry, side, shot),
@@ -209,6 +228,8 @@ def compile_panel(project, page, panel, template_box, settings):
         "layout": doc, "prompt": prompt,
         "negative": settings.get("negative", ""), "seeds": seeds,
         "explore": sorted(explore),
+        # 待補的具名角色與「你是不是要對應到 X」的建議（D11 只給建議，不自動套用）
+        "unresolved": unresolved,
         # 帳單軌：這一格用了哪幾段、每段的指紋（卡片改了就算得出哪幾格過期）
         "fingerprint": {
             "style": _digest("%s|%s|%s" % (settings["style"], settings.get("meta"), settings.get("sfx"))),

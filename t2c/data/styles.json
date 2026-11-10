@@ -4,6 +4,7 @@
   "presets": {
     "mono": {
       "name": "日式黑白頁漫",
+      "gray": true,
       "look": "日式黑白頁漫",
       "style": "Black and white Japanese manga artwork, clean confident ink lineart, screentone shading, high contrast, no color",
       "meta": ["manga panel", "black and white", "screentone"],
@@ -11,6 +12,7 @@
     },
     "color": {
       "name": "彩色日式頁漫",
+      "gray": false,
       "look": "彩色日式頁漫",
       "style": "Full color Japanese manga artwork, clean confident lineart, vivid cel shading, soft rim light, rich saturated palette",
       "meta": ["manga panel", "full color", "cel shading"],
@@ -18,6 +20,7 @@
     },
     "american": {
       "name": "美式彩色漫畫",
+      "gray": false,
       "look": "美式彩色漫畫",
       "style": "American comic book illustration, bold dynamic inking, dramatic light and shadow, halftone shading, full color",
       "meta": ["comic panel", "american comic book", "full color"],

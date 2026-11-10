@@ -320,10 +320,12 @@ def test_compose_with_lettering_writes_page_and_no_letter_does_not(comic):
             x, y = b["center"]
             region = lettered.crop((int(x - b["rx"] * 0.5), int(y - b["ry"] * 0.7), int(x + b["rx"] * 0.5),
                                     int(y + b["ry"] * 0.7)))
-            assert region.getextrema() == (region.getextrema()[0], 255) and region.getextrema()[0] < 80
+            extrema = region.convert("L").getextrema()          # 頁面可能是 RGB（預設保留原色）
+            assert extrema[1] == 255 and extrema[0] < 80
     plain, _ = compose.compose_chapter(project, 1, board, out_dir=project.root / "plain")
     first = plan["panels"][0]["bubbles"][0]["center"]
-    assert Image.open(plain[0][1]).getpixel(tuple(int(v) for v in first)) == 120
+    value = Image.open(plain[0][1]).getpixel(tuple(int(v) for v in first))
+    assert (value[0] if isinstance(value, tuple) else value) == 120
 
 
 def test_cli_letters_and_options(comic, capsys, tmp_path):

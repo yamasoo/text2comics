@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from . import cast
+
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.S)
 
 # 劇本用的中文鏡頭詞 → 分鏡的英文列舉值（compile.SHOT／ANGLE 的 key）
@@ -225,13 +227,10 @@ def parse_script(text):
 
 
 def resolve_speaker(project, name):
-    """劇本裡的名字（姓名、別名、id 都可以）→ 角色 id；找不到回傳 None。"""
-    name = (name or "").strip()
-    for cid, card in project.characters.items():
-        names = [cid, str(card.get("name") or "")] + [str(a) for a in (card.get("aliases") or [])]
-        if name in [n for n in names if n]:
-            return cid
-    return None
+    """劇本裡的名字（姓名、別名、id 都可以）→ 角色 id；找不到回傳 None。
+    比對只有一份（D12）：這裡只是 cast.resolve() 的薄包裝。"""
+    cid, _how = cast.resolve(project, (name or "").strip())
+    return cid
 
 
 def check_page(project, page, expect_page=None, expect_template=None, panel_count=None, strict=True):

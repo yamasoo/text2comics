@@ -1,5 +1,35 @@
 # 更新紀錄
 
+## 1.12.2 — 2026-11-10（組版預設保留原色；灰階改成明寫才做）
+
+**1.12.1 的規則錯了**：它讓「畫風預設集」決定灰階，而沒寫 `style_preset` 的舊專案會退回預設集 `mono`。結果是「出圖彩色、頁面卻變黑白」——使用者實際踩到（`examples/sample_comic` 就是這種專案：沒有 `style_preset`、renders 是 RGB、頁面卻是 L）。
+
+- **`compose.auto_gray()`**：預設**保留原色**；只有 `project.yaml` 的 `output.gray: true` 才轉灰階。不再依畫風預設集自動判斷（`styles.json` 的 `gray` 只是那個畫風的建議值，程式不套用）。
+- **`tools/pages.py`**：`--gray` 轉灰階、`--color` 保留原色，都不給＝保留原色。
+- **代價**：黑白專案的 PDF／CBZ 由 DeviceGray 變 DeviceRGB，檔案較大；想小一點就寫 `output.gray: true`。
+- **測試**：`tests/test_gray.py` 6 項改成新語意；`test_compose`／`test_letter` 的像素斷言改成 RGB 相容（頁面預設不是 L 了）。全專案 **581 passed, 1 skipped**。
+- **實測**：`python tools/pages.py examples/sample_comic 1 --out .tmp/pages_check` → `p001.png` 是 **RGB**（1.12.1 會是 L）。
+## 1.12.1 — 2026-11-10（組版要不要轉灰階，跟著畫風預設集）
+
+**症狀**：出圖是彩色，按「輸出頁面」與即時預覽卻都是黑白。原因是 `t2c/compose.py` 的 `gray` 預設 `True`，而介面的三個呼叫端（`app.py:95` 即時預覽、`app.py:129` 嵌字預覽、`server/tasks.py:426` 輸出頁面）都沒有傳——只有命令列 `tools/pages.py --color` 有開關。N5 的畫風預設集只改到提示詞，組版這一層沒跟上。
+
+- **`t2c/data/styles.json`**：每組加 `gray`（`mono`=true、`color`／`american`=false）；`t2c/styles.py` 驗證它必須是布林，`resolve()` 多回一個 `gray`。
+- **`t2c/compose.py`**：`gray` 預設改成 `None`＝自動；新增 `auto_gray(project)` 讀 `styles.resolve(project.config)`，顯式傳值仍可覆寫。
+- **`project.yaml` 的 `output.gray`**：逐專案覆寫（沿用「明寫蓋掉預設集」的慣例）。
+- **`tools/pages.py`**：`--color` 改成強制保留原色，新增 `--gray`；都不給＝跟著畫風預設集。
+- **測試**：`tests/test_gray.py` 6 項；全專案 **581 passed, 1 skipped**。
+- **沒有改的**：介面沒有新增開關（真相在專案檔）；頁面分頁還不會提示「這部作品是黑白頁漫」。`gray: true` 只是拿掉顏色，不是二值化＋網點——兩點都記進 `docs/backlog.md`。
+## 1.12.0 — 2026-11-10（微5：角色解析——一個解析層、三種角色、三個一鍵動作）
+
+分鏡寫 `hynesen`、卡片是 `ale_heinessen`（或 `lin`）時，明明有卡卻被當成「探索用」，整格不能選圖；龍套本來就沒有卡，也被同一種方式鎖住。這一版把三種情況分開（決策 D9–D12）。
+
+- **`t2c/cast.py`（新增，D12）**：全專案唯一的角色解析層。`resolve()` 依序比對精確 id → 卡片姓名 → 別名 → 正規化（NFKC、大小寫、空白、連字號與底線）；`grade()` 回三級（`card`／`extra`／`missing`）；`suggest()` 用 `difflib` 給建議。`bible.find_card()` 與 `script.resolve_speaker()` 改成它的薄包裝（原本是兩份一樣的比對）。
+- **`extra` 旗標（D9）**：分鏡的 `characters[]` 可以寫 `"extra": true`，代表臨時角色。`t2c/compile.py` 給它通用外觀（`An unnamed minor character with a plain generic appearance`）＋左右的說明，**不猜**性別髮型；指紋記成 `extra:<id>` 的常數，所以不會永遠算過期。解析失敗又沒有旗標的才維持探索用，並在 `job["unresolved"]` 帶出建議。
+- **`t2c/check.py`**：`CHAR_KEYS` 加 `extra`；缺卡的提醒改成「龍套請標 `extra`；名字寫錯就改 id 或補別名」，並附「你是不是要對應到 X？」；有卡卻標 `extra` 會提醒它沒有作用。
+- **三個一鍵動作（D10、D11）**：`workspace.remap_character()`（改這一章的 id 與對話框 speaker，可順便記成別名）、`workspace.mark_extra()`、`workspace.drop_character()`（拿掉角色，他說的對話框改成旁白）；端點 `POST /api/chapter/character/remap｜extra｜drop`。`GET /api/chapter/panels` 每格多 `unresolved`。
+- **介面**：分鏡頁的每個角色列下方多「探索用：還沒有『X』的卡片」與三顆動作（對應到既有卡片…／順便記成別名／標為臨時角色／從這一章移除）；出圖頁的鎖住格改列「你是不是要對應到 X」與「到分鏡頁修角色 →」。
+- **測試**：`tests/test_cast.py`（6）、`tests/test_character_api.py`（8）、`test_ui` 靜態斷言（1）；全專案 **575 passed, 1 skipped**。
+- **實機**：1280×800、淺色、同一個範例影本（把 `lin` 改成對不上的 `hynesen`）。改前分鏡頁的角色下拉顯示成「周子浩（hao）」——錯的人、沒有任何修法；改後顯示「hynesen（還沒有卡片）」與三顆動作。出圖頁改前列「先把卡片做出來」（誤導：卡其實存在，只是名字對不上），改後列原因與「到分鏡頁修角色 →」。按一次「標為臨時角色」後，分鏡檢查從「6 個錯誤、4 則提醒」變「1 則提醒」，`panels` 的 `explore`／`unresolved` 都清空。截圖在 `work/n9_ui/shots/`（不進版控），逐條驗收在 `docs/qa/L4.md`。
 ## 1.11.3 — 2026-11-10（推送只更新 main；建 commit 不再抓到上層 repo）
 
 - **預設只推 `main`**：`push_github.bat` 現在只更新 `main`（GitHub 的預設分支）與 `gh-pages`（說明頁），`v1_baseline` 不動。要一起更新就 `push_github.bat --branches main,v1_baseline`；不要說明頁就 `--no-pages`。每個分支各自以 `origin/<分支>` 的 tip 當 parent，所以推送都是 fast-forward（`gh-pages` 是新的 root，用 `--force-with-lease`）。

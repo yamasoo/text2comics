@@ -34,8 +34,14 @@ def comic(tmp_path):
     return project, project.load_storyboard(1)
 
 
+def px(img, xy):
+    """一個像素的亮度。頁面可能是 RGB（預設保留原色）或 L（output.gray: true）。"""
+    value = img.getpixel(xy)
+    return value[0] if isinstance(value, tuple) else value
+
+
 def center(img, rect):
-    return img.getpixel(((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2))
+    return px(img, ((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2))
 
 
 def test_page_is_b5_ratio_with_dpi(comic):
@@ -45,7 +51,7 @@ def test_page_is_b5_ratio_with_dpi(comic):
     data = layout.load_pages()["page"]
     assert img.size == layout.page_size(data)
     assert abs(img.size[0] / img.size[1] - 182 / 257) < 0.001
-    assert img.mode == "L"
+    assert img.mode == "RGB"                             # 預設保留原色；要灰階寫 output.gray: true
     assert round(img.info["dpi"][0]) == compose.page_dpi(data) == 254
 
 
@@ -71,10 +77,10 @@ def test_frames_and_gutters(comic):
     page = layout.load_pages()
     cfg = page["page"]
     rect = layout.panel_rect_px(cfg, page["templates"]["5a"]["panels"][0])
-    assert img.getpixel((rect[0] + 1, (rect[1] + rect[3]) // 2)) == 0      # 框線是黑的
-    assert img.getpixel((rect[0] + cfg["frame_px"] + 6, (rect[1] + rect[3]) // 2)) != 0   # 框內是圖
-    assert img.getpixel((rect[0] - cfg["gutter_px"] // 4, (rect[1] + rect[3]) // 2)) == 255   # 格外是白邊
-    assert img.getpixel((2, 2)) == 255                                      # 頁邊是白的
+    assert px(img, (rect[0] + 1, (rect[1] + rect[3]) // 2)) == 0      # 框線是黑的
+    assert px(img, (rect[0] + cfg["frame_px"] + 6, (rect[1] + rect[3]) // 2)) != 0   # 框內是圖
+    assert px(img, (rect[0] - cfg["gutter_px"] // 4, (rect[1] + rect[3]) // 2)) == 255   # 格外是白邊
+    assert px(img, (2, 2)) == 255                                      # 頁邊是白的
 
 
 def test_pick_overrides_default(comic):

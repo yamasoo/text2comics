@@ -24,6 +24,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from . import cast
+
 import yaml
 
 from . import bible_check as bc, look
@@ -182,11 +184,11 @@ KINDS_REV = {v: k for k, v in KINDS.items()}
 
 
 def find_card(project, name, aliases=(), kind="character"):
-    """名字、別名或 id 對得上的定案卡片 id（沒有就是 None）。"""
-    wanted = {name, *aliases}
-    cards = project.characters if kind == "character" else project.locations
-    for cid, card in cards.items():
-        if wanted & ({cid, str(card.get("name") or "")} | {str(a) for a in card.get("aliases") or []}):
+    """名字、別名或 id 對得上的定案卡片 id（沒有就是 None）。
+    比對只有一份（D12）：這裡只是 cast.resolve() 的薄包裝，多個寫法取第一個對得上的。"""
+    for raw in [name, *aliases]:
+        cid, _how = cast.resolve(project, raw, kind)
+        if cid is not None:
             return cid
     return None
 
@@ -319,6 +321,25 @@ def apply_sections(project, kind, cid, sections=None, outfits=None, draft=False,
     if write:
         path.write_text(text, encoding="utf-8")
     return {"path": str(path), "text": text, "issues": issues, "stale": stale}
+
+
+def add_alias(project, cid, alias, kind="character"):
+    """把一個寫法記進卡片的別名（D11：一鍵對應時人按了才記，不自動）。回 (路徑, 別名清單)。"""
+    alias = str(alias or "").strip()
+    if not alias:
+        raise BibleError("別名不能是空的")
+    path = cards_dir(project, kind) / ("%s.md" % cid)
+    if not path.is_file():
+        raise BibleError("找不到卡片：%s" % path)
+    meta, body = read_front_matter(path)
+    aliases = [str(a) for a in meta.get("aliases") or []]
+    if alias in aliases or alias == str(cid) or alias == str(meta.get("name") or ""):
+        return path, aliases
+    aliases.append(alias)
+    meta["aliases"] = aliases
+    meta.pop("_path", None)
+    path.write_text(render_card(meta, body, status=str(meta.get("status") or "confirmed")), encoding="utf-8")
+    return path, aliases
 
 
 def _list_block(items, indent):

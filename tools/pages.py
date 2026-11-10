@@ -9,7 +9,7 @@
     python tools/pages.py examples/sample_comic 1 --focus p001_k1=0.3,0.6        # 裁切焦點（原圖比例 x,y）
     python tools/pages.py examples/sample_comic 1 --zoom p001_k1=1.5             # 再放大（1–4）
     python tools/pages.py examples/sample_comic 1 --numbers           # 在每格標 slot 編號（檢查閱讀順序用）
-    python tools/pages.py examples/sample_comic 1 --color             # 保留原色（預設轉灰階）
+    python tools/pages.py examples/sample_comic 1 --gray              # 轉灰階（PDF／CBZ 比較小；預設保留原色）
     python tools/pages.py examples/sample_comic 1 --no-letter         # 只組版、不嵌字
     python tools/pages.py examples/sample_comic 1 --guides            # 嵌字加上臉框與 anchor（檢查自動位置用）
 --pick／--focus／--zoom 可重複；先寫入 picks 再組版。
@@ -89,7 +89,8 @@ def main(argv=None):
     ap.add_argument("--focus", action="append", help="格id=x,y（可重複）")
     ap.add_argument("--zoom", action="append", help="格id=倍率（可重複）")
     ap.add_argument("--numbers", action="store_true", help="每格標上 slot 編號（只用來檢查順序）")
-    ap.add_argument("--color", action="store_true", help="保留原色（預設轉灰階）")
+    ap.add_argument("--color", action="store_true", help="保留原色（預設）")
+    ap.add_argument("--gray", action="store_true", help="轉灰階（PDF／CBZ 比較小；也可以寫進 project.yaml 的 output.gray）")
     ap.add_argument("--out", help="輸出資料夾（預設 pages/chNNN/）")
     ap.add_argument("--no-letter", action="store_true", help="只組版，不嵌字")
     ap.add_argument("--guides", action="store_true", help="嵌字時畫出臉框與 anchor（檢查用，不是正式輸出）")
@@ -114,8 +115,9 @@ def main(argv=None):
         lettering = None
         if not args.no_letter:
             lettering = letter.Settings.from_config(settings.load(args.config, root=ROOT).get("lettering"))
+        gray = True if args.gray else (False if args.color else None)      # 都沒給＝保留原色（跟專案的 output.gray）
         written, warnings = compose.compose_chapter(project, args.chapter, storyboard, only_page=args.page, picks=picks,
-                                                    gray=not args.color, numbers=args.numbers, out_dir=args.out,
+                                                    gray=gray, numbers=args.numbers, out_dir=args.out,
                                                     lettering=lettering, guides=args.guides)
     except (ProjectError, CompileError, compose.ComposeError, letter.LetterError) as error:
         print("錯誤：%s" % error, file=sys.stderr)

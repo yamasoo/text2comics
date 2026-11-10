@@ -67,6 +67,23 @@
 
     const charName = (id) => (vocab.characters.find((c) => c.id === id) || { name: id }).name;
     const locName = (id) => (vocab.locations.find((c) => c.id === id) || { name: id }).name;
+    const hasCard = (id) => vocab.characters.some((x) => x.id === id);
+
+    /* ── 角色解析的三個一鍵動作（微5／D9、D10）：都只動這一章，成功後重載分頁 ── */
+    const characterFix = async (path, body, ok) => {
+      try {
+        const res = await T2C.post(path, Object.assign({ chapter: n }, body), ctx);
+        FE.toast(ok(res), "ok");
+        FE.route();
+      } catch (error) { FE.fail(error); }
+    };
+    const remapCharacter = (from, to, remember) => characterFix("/api/chapter/character/remap",
+      { from, to, remember_alias: !!remember },
+      (res) => `「${from}」→ ${res.card}（改了 ${res.changed.length} 格${res.aliases.length ? "，已記成別名" : ""}${res.other_chapters.length ? `；第 ${res.other_chapters.join("、")} 章也有同樣的寫法` : ""}）`);
+    const markExtra = (from) => characterFix("/api/chapter/character/extra", { from },
+      (res) => `「${from}」標成臨時角色：${res.changed.length} 格可以出圖與選圖（通用外觀，不佔聖經的位置）`);
+    const dropCharacter = (from) => characterFix("/api/chapter/character/drop", { from },
+      (res) => `「${from}」已從這一章移除${res.narration.length ? `，${res.narration.length} 個對話框改成旁白` : ""}`);
     const changed = (opts = {}) => {
       FE.dirty.set(true);
       statusEl.textContent = "尚未存檔";
@@ -217,12 +234,30 @@
             h("button", { class: "btn btn-sm btn-ghost", type: "button", onclick: () => { panel[key].splice(i, 1); st.item = null; changed({ editor: true }); } }, "刪除")))));
 
       lists.append(
-        list("角色", "characters", (c) => h("div", { class: "sb-grid" },
-          field("角色", select(c.id, vocab.characters.map((x) => [x.id, `${x.name}（${x.id}）`]), (v) => { c.id = v; c.outfit = "default"; changed({ editor: true }); })),
-          field("服裝", select(c.outfit || "default", ((vocab.characters.find((x) => x.id === c.id) || {}).outfits || ["default"]).map((o) => [o, o]), (v) => { c.outfit = v; changed(); })),
-          field("姿勢（英文）", text(c.pose, (v) => { c.pose = v; })),
-          field("表情（英文）", text(c.expression, (v) => { c.expression = v; })),
-          h("div", { class: "muted t2c-small sb-box" }, `框 ${(c.box || [0.25, 0.1, 0.75, 1]).join(", ")}`)),
+        list("角色", "characters", (c) => {
+          const known = hasCard(c.id);
+          const remember = h("input", { type: "checkbox" });
+          const options = vocab.characters.map((x) => [x.id, `${x.name}（${x.id}）`]);
+          if (!known) options.unshift([c.id, `${c.id}（還沒有卡片）`]);      // 不讓下拉顯示空白；真正的修法在下面三顆
+          return h("div", { class: "stack t2c-tight" },
+            h("div", { class: "sb-grid" },
+              field("角色", select(c.id, options, (v) => { c.id = v; c.outfit = "default"; changed({ editor: true }); })),
+              field("服裝", select(c.outfit || "default", ((vocab.characters.find((x) => x.id === c.id) || {}).outfits || ["default"]).map((o) => [o, o]), (v) => { c.outfit = v; changed(); })),
+              field("姿勢（英文）", text(c.pose, (v) => { c.pose = v; })),
+              field("表情（英文）", text(c.expression, (v) => { c.expression = v; })),
+              h("div", { class: "muted t2c-small sb-box" }, `框 ${(c.box || [0.25, 0.1, 0.75, 1]).join(", ")}`)),
+            known
+              ? (c.extra === true ? h("p", { class: "muted t2c-small" }, "已經有卡片，extra 旗標沒有作用（存檔時會忽略）。") : null)
+              : h("div", { class: "stack t2c-tight" },
+                  h("div", { class: "row t2c-tight" }, T2C.chip(`探索用：還沒有「${c.id}」的卡片`, "warn")),
+                  h("label", { class: "field" }, h("span", { class: "t2c-small" }, "對應到既有卡片…"),
+                    select("", vocab.characters.map((x) => [x.id, `${x.name}（${x.id}）`]),
+                      (v) => { if (v) remapCharacter(c.id, v, remember.checked); }, "（選一張卡）")),
+                  h("label", { class: "row t2c-tight t2c-small" }, remember, "順便記成別名（下一章同樣寫法就對得上）"),
+                  h("div", { class: "row t2c-tight" },
+                    h("button", { class: "btn btn-sm", type: "button", onclick: () => markExtra(c.id) }, "標為臨時角色"),
+                    h("button", { class: "btn btn-sm btn-ghost", type: "button", onclick: () => dropCharacter(c.id) }, "從這一章移除"))));
+        },
         () => {
           const free = vocab.characters.find((x) => !present.includes(x.id));
           if (!free) return FE.toast("聖經裡的角色都已經在這一格了", "warn");

@@ -375,6 +375,31 @@ def storyboard_save(body: dict = Body(...)):
     return {"path": str(path), "storyboard": board, "issues": issues}
 
 
+@router.post("/api/chapter/character/remap")
+def character_remap(body: dict = Body(...)):
+    """「對應到既有卡片」：只動這一章（D10）；remember_alias 時順便記進卡片的別名（D11）。"""
+    proj, n = body_project(body), chapter(body.get("chapter"))
+    with guard("bad_character"):
+        return workspace.remap_character(proj, n, body.get("from"), body.get("to"),
+                                         remember_alias=body.get("remember_alias") is True)
+
+
+@router.post("/api/chapter/character/extra")
+def character_extra(body: dict = Body(...)):
+    """「標為臨時角色」：分鏡寫 extra: true（D9），這一格就能出圖與選圖，不佔聖經的位置。"""
+    proj, n = body_project(body), chapter(body.get("chapter"))
+    with guard("bad_character"):
+        return workspace.mark_extra(proj, n, body.get("from"))
+
+
+@router.post("/api/chapter/character/drop")
+def character_drop(body: dict = Body(...)):
+    """「從這一格移除」：拿掉 characters[]，他說的對話框改成旁白。"""
+    proj, n = body_project(body), chapter(body.get("chapter"))
+    with guard("bad_character"):
+        return workspace.drop_character(proj, n, body.get("from"))
+
+
 @router.post("/api/chapter/prompt")
 def panel_prompt(body: dict = Body(...)):
     """編譯一格（可以是還沒存的分鏡），回傳送給 MOSS 的 layout 與生圖尺寸。"""
@@ -399,7 +424,9 @@ def panels(project: str = "", chapter_no: int = Query(1, alias="chapter"), profi
         jobs = render.chapter_jobs(proj, n)
         stale_ids = {row["id"] for row in stale.chapter(proj, n, jobs=jobs)}
     explore = {job["id"]: list(job.get("explore") or []) for job in jobs}
-    data["panels"] = [dict(row, explore=explore.get(row["id"], []), stale=row["id"] in stale_ids)
+    unresolved = {job["id"]: list(job.get("unresolved") or []) for job in jobs}
+    data["panels"] = [dict(row, explore=explore.get(row["id"], []),
+                           unresolved=unresolved.get(row["id"], []), stale=row["id"] in stale_ids)
                       for row in data["panels"]]
     cfg = config()
     chapter_profile = _project_profile(cfg, proj)

@@ -1,6 +1,6 @@
 """畫風預設集（N5）：黑白／彩色／美式三組，style、meta 與文字端的畫風描述（look）只有這一份來源。
 
-    p = styles.resolve(project.config)          # {"preset", "name", "look", "style", "meta", "sfx"}
+    p = styles.resolve(project.config)          # {"preset", "name", "look", "style", "meta", "sfx", "gray"}
     p = styles.resolve({"style_preset": "color"})
     prompts.system(p["look"])                    # 文字端提示詞跟著預設集走
 
@@ -43,6 +43,8 @@ def _load():
             raise StylesError("畫風預設集 %s 的 presets.%s 缺 %s" % (DATA.name, name, "、".join(missing)))
         if not isinstance(preset["meta"], list) or not all(str(m).strip() for m in preset["meta"]):
             raise StylesError("畫風預設集 %s 的 presets.%s.meta 要是字串陣列" % (DATA.name, name))
+        if not isinstance(preset.get("gray"), bool):
+            raise StylesError("畫風預設集 %s 的 presets.%s.gray 要是 true 或 false（組版要不要轉灰階）" % (DATA.name, name))
     _cache["presets"] = presets
     _cache["default"] = str(raw.get("default") or DEFAULT_PRESET)
     if _cache["default"] not in presets:
@@ -77,4 +79,6 @@ def resolve(cfg=None):
     meta = [str(m).strip() for m in (cfg.get("meta") or base["meta"]) if str(m).strip()]
     look = str(cfg.get("look") or base["look"]).strip()
     sfx = str(cfg.get("sfx") or base["sfx"]).strip()
-    return {"preset": key, "name": base["name"], "look": look, "style": style, "meta": meta, "sfx": sfx}
+    out = cfg.get("output") if isinstance(cfg.get("output"), dict) else {}
+    gray = out["gray"] if isinstance(out.get("gray"), bool) else base["gray"]
+    return {"preset": key, "name": base["name"], "look": look, "style": style, "meta": meta, "sfx": sfx, "gray": bool(gray)}

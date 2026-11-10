@@ -756,3 +756,14 @@ def test_static_bible_reverse_panel():
     assert "還沒跑過反推" in bible and "上次被停止" in bible
     assert "innerHTML" not in bible
 
+
+def test_static_storyboard_has_the_three_character_fixes():
+    """微5：三個一鍵動作（對應卡片／標為臨時角色／從這一章移除）與「你是不是要對應到 X」的提示都在靜態檔裡。"""
+    storyboard = (ROOT / "web" / "static" / "storyboard.js").read_text(encoding="utf-8")
+    panels = (ROOT / "web" / "static" / "panels.js").read_text(encoding="utf-8")
+    for path in ("/api/chapter/character/remap", "/api/chapter/character/extra", "/api/chapter/character/drop"):
+        assert path in storyboard, path
+    for literal in ("對應到既有卡片", "順便記成別名", "標為臨時角色", "從這一章移除", "探索用：還沒有"):
+        assert literal in storyboard, literal
+    assert "unresolved" in panels and "你是不是要對應到" in panels
+    assert "innerHTML" not in storyboard and "innerHTML" not in panels

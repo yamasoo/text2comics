@@ -8,7 +8,7 @@ import re
 import shutil
 from pathlib import Path
 
-from . import bible, check, compose, layout, letter, script as sc, styles
+from . import bible, cast, check, compose, layout, letter, script as sc, styles
 from .compile import CompileError, _seed, compile_chapter
 from .project import FRONT, Project, ProjectError
 
@@ -491,14 +491,154 @@ def save_storyboard(project, n, doc):
     except CompileError as error:
         raise WorkspaceError("分鏡無法編譯，沒有存檔：%s" % error)
     issues = storyboard_issues(project, n, board)
-    for job in compile_chapter(project, board):          # 探索用（D2）：缺卡不算錯誤，但要講清楚哪幾格是探索用
-        if job.get("explore"):
-            issues.append(sc.Issue("warn", "第 %s 頁第 %s 格" % (job["page"], job["slot"]),
-                                "探索用：角色 %s 還沒有卡片，這一格不進選圖／頁面／過期清單" % "、".join(job["explore"])))
+    # 探索用（D2／D9）：缺卡不算錯誤，但要講清楚哪幾格、怎麼解。龍套標 extra，名字寫錯就改 id（D11 只給建議）。
+    for job in compile_chapter(project, board):
+        where = "第 %s 頁第 %s 格" % (job["page"], job["slot"])
+        for row in job.get("unresolved") or []:
+            hint = ("；你是不是要對應到「%s」？" % "」或「".join(row["suggest"])) if row.get("suggest") else ""
+            issues.append(sc.Issue("warn", where,
+                                "探索用：角色「%s」還沒有卡片，這一格不進選圖／頁面／過期清單。龍套請標 \"extra\": true；名字寫錯就改 id 或補別名%s" % (row["id"], hint)))
     path = project.storyboard_path(n)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(board, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path, board, issue_dicts(issues)
+
+
+# ---------------------------------------------------------------------------
+# 角色解析的三個一鍵動作（微5／D9、D10）：只動這一章的分鏡
+# ---------------------------------------------------------------------------
+def _chapter_panels(board):
+    for page in board.get("pages") or []:
+        for panel in page.get("panels") or []:
+            yield page, panel
+
+
+def chapters_with_id(project, skip, cid):
+    """其他章也用了同一個 id 的章號（D10 的提示；不改它們）。"""
+    out = []
+    folder = project.root / "storyboard"
+    for path in (sorted(folder.glob("ch*.json")) if folder.is_dir() else []):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        no = int(doc.get("chapter") or re.sub(r"\D", "", path.stem) or 0)
+        if not no or no == skip:
+            continue
+        if any(str(entry.get("id") or "") == cid for _page, panel in _chapter_panels(doc)
+               for entry in panel.get("characters") or []):
+            out.append(no)
+    return out
+
+
+def _character_edit(project, n, mutate):
+    """讀這一章的分鏡 → mutate(board) → 走 save_storyboard（同一套驗證與存檔）。"""
+    n = _chapter(n)
+    try:
+        board = project.load_storyboard(n)
+    except ProjectError as error:
+        raise WorkspaceError(str(error))
+    extra = mutate(board) or {}
+    path, saved, issues = save_storyboard(project, n, board)
+    out = {"path": str(path), "chapter": n, "storyboard": saved, "issues": issues}
+    out.update(extra)
+    return out
+
+
+def remap_character(project, n, old, new, remember_alias=False):
+    """「對應到既有卡片」：這一章寫成 old 的角色 id 改成 new 那張卡（D10 只動這一章）。
+    remember_alias=True 時順便把人按的這個寫法記進卡片的別名（D11）。"""
+    old, new = str(old or "").strip(), str(new or "").strip()
+    if not old or not new:
+        raise WorkspaceError("對應要有「原本的寫法」與「卡片」兩個值")
+    cid, how = cast.resolve(project, new)
+    if cid is None:
+        raise WorkspaceError("「%s」不是任何卡片的 id、姓名或別名；先建卡片，或把這個拼法補進別名" % new)
+    if cid == old:
+        raise WorkspaceError("「%s」本來就對得上這張卡，不用改" % old)
+
+    def mutate(board):
+        changed = []
+        for page, panel in _chapter_panels(board):
+            hit = False
+            for entry in panel.get("characters") or []:
+                if str(entry.get("id") or "") != old:
+                    continue
+                entry["id"] = cid
+                entry.pop("extra", None)                  # 有卡了，臨時角色的旗標就沒有意義
+                hit = True
+            for bubble in panel.get("bubbles") or []:     # 說話的人寫的是卡片 id，一起改（不然編譯不過）
+                if str(bubble.get("speaker") or "") == old:
+                    bubble["speaker"] = cid
+                    hit = True
+            if hit:
+                changed.append({"page": page.get("page"), "slot": panel.get("slot")})
+        if not changed:
+            raise WorkspaceError("這一章的分鏡沒有用到「%s」；別章請先切到那一章" % old)
+        return {"changed": changed}
+
+    out = _character_edit(project, n, mutate)
+    out["card"], out["how"], out["aliases"] = cid, how, []
+    if remember_alias:
+        path, aliases = bible.add_alias(project, cid, old)
+        project.characters[cid]["aliases"] = aliases        # 這一個請求內就生效
+        out["aliases"], out["card_path"] = [old], str(path)
+    out["other_chapters"] = chapters_with_id(project, n, old)
+    return out
+
+
+def mark_extra(project, n, cid):
+    """「標為臨時角色」：這一章把這個 id 標成 extra: true（D9），解除探索用的鎖。龍套不佔聖經的位置。"""
+    cid = str(cid or "").strip()
+    if not cid:
+        raise WorkspaceError("要指定角色 id")
+    if cast.resolve(project, cid)[0] is not None:
+        raise WorkspaceError("「%s」已經有卡片，不需要標成臨時角色" % cid)
+
+    def mutate(board):
+        changed = []
+        for page, panel in _chapter_panels(board):
+            for entry in panel.get("characters") or []:
+                if str(entry.get("id") or "") == cid:
+                    entry["extra"] = True
+                    changed.append({"page": page.get("page"), "slot": panel.get("slot")})
+        if not changed:
+            raise WorkspaceError("這一章的分鏡沒有用到「%s」" % cid)
+        return {"changed": changed}
+
+    out = _character_edit(project, n, mutate)
+    out["other_chapters"] = chapters_with_id(project, n, cid)
+    return out
+
+
+def drop_character(project, n, cid):
+    """「從這一格移除」：這一章把這個角色從 characters 拿掉，他說的對話框改成旁白（D9 的第三個動作）。"""
+    cid = str(cid or "").strip()
+    if not cid:
+        raise WorkspaceError("要指定角色 id")
+
+    def mutate(board):
+        changed, narration = [], []
+        for page, panel in _chapter_panels(board):
+            chars = panel.get("characters") or []
+            keep = [entry for entry in chars if str(entry.get("id") or "") != cid]
+            if len(keep) != len(chars):
+                panel["characters"] = keep
+                changed.append({"page": page.get("page"), "slot": panel.get("slot")})
+            for bubble in panel.get("bubbles") or []:
+                if str(bubble.get("speaker") or "") != cid:
+                    continue
+                bubble["kind"] = "narration"
+                bubble.pop("speaker", None)
+                bubble.pop("offscreen", None)
+                narration.append({"page": page.get("page"), "slot": panel.get("slot")})
+        if not changed and not narration:
+            raise WorkspaceError("這一章的分鏡沒有用到「%s」" % cid)
+        return {"changed": changed, "narration": narration}
+
+    out = _character_edit(project, n, mutate)
+    out["other_chapters"] = chapters_with_id(project, n, cid)
+    return out
 
 
 def compile_one(project, n, panel_id, doc=None):
